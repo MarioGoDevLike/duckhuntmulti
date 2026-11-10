@@ -1,0 +1,3 @@
+# Installed and built on each machine (Vercel runs npm install + vite build itself)
+node_modules/
+dist/
