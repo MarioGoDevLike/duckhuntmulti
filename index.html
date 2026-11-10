@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Marsh Dawn — Duck Hunt</title>
+<style>
+  html,body,#root{margin:0;height:100%;overflow:hidden;background:#111;font-family:Georgia,'Times New Roman',serif;
+                  user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none;overscroll-behavior:none}
+  canvas{display:block;width:100vw;height:100vh;height:100dvh}
+  .account{margin-top:20px;padding-top:16px;border-top:1px solid rgba(241,232,208,.2)}
+  .account h2{margin:12px 0 8px;font-size:20px;font-weight:normal;letter-spacing:2px}
+  .who{font-size:14px;color:#c9b98a;margin-top:8px}
+  .err{font-size:14px;color:#ff9a80;margin-top:8px}
+  button.ghost{font-size:14px;letter-spacing:1px;padding:8px 18px;color:#f1e8d0;background:transparent;border:1px solid rgba(241,232,208,.5)}
+  button.ghost:hover{background:rgba(241,232,208,.15)}
+  .who button.ghost{padding:3px 10px;margin-left:8px;font-size:12px}
+  .board{list-style:none;margin:0;padding:0;font-size:15px;text-align:left}
+  .board li{display:flex;gap:10px;padding:4px 8px;border-radius:3px}
+  .board li.me{background:rgba(226,200,119,.2)}
+  .board span:first-child{width:22px;color:#c9b98a}
+  .board span:nth-child(2){flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .board span:nth-child(3){color:#b9c2a8}
+  .board b{color:#ffd76a;min-width:52px;text-align:right}
+  .overlay{position:fixed;inset:0;display:flex;overflow:auto;touch-action:pan-y;padding:12px;box-sizing:border-box;color:#f1e8d0;text-align:center;
+           background:radial-gradient(ellipse at center,rgba(10,14,10,.35),rgba(5,8,5,.82))}
+  .card{margin:auto;max-width:540px;padding:36px 44px;box-sizing:border-box;border:1px solid rgba(241,232,208,.25);border-radius:6px;
+        background:rgba(20,26,18,.72);backdrop-filter:blur(5px)}
+  h1{margin:0;font-size:46px;letter-spacing:3px;font-weight:normal}
+  .sub{margin:6px 0 22px;font-style:italic;color:#c9b98a}
+  .stats{font-size:19px;line-height:1.7;margin-bottom:18px}
+  .stats b{color:#ffd76a}
+  .keys{font:14px/1.7 Consolas,monospace;color:#b9c2a8;margin:20px 0 0}
+  .label{font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#c9b98a;margin-bottom:10px}
+  .guns{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
+  .gun{display:flex;flex-direction:column;gap:4px;padding:14px 12px;text-align:left;letter-spacing:0;font-size:15px;color:#f1e8d0;
+       background:rgba(241,232,208,.06);border:1px solid rgba(241,232,208,.3)}
+  .gun:hover{background:rgba(241,232,208,.14)}
+  .gun.on{background:rgba(226,200,119,.22);border-color:#e2c877;box-shadow:inset 0 0 0 1px #e2c877}
+  .gun b{font-size:18px;font-weight:normal}
+  .gun small{font-style:italic;color:#c9b98a}
+  .gun span{font:12px/1.5 Consolas,monospace;color:#b9c2a8}
+  .menu{display:flex;flex-direction:column;align-items:center;gap:12px}
+  .menu button.ghost{font-size:16px;padding:10px 0;width:220px}
+  button{font:inherit;font-size:22px;letter-spacing:4px;padding:12px 54px;color:#1a1f14;background:#e2c877;border:0;border-radius:3px;cursor:pointer}
+  button:hover{background:#ffe08a}
+  .hud{position:fixed;inset:0;pointer-events:none;color:#f1e8d0;text-shadow:0 1px 3px #000}
+  .top{display:flex;justify-content:space-between;align-items:center;font-size:20px;background:linear-gradient(rgba(0,0,0,.45),transparent);
+       padding:10px max(20px,env(safe-area-inset-right)) 10px max(20px,env(safe-area-inset-left))}
+  .top span{flex:1}.top span:last-child{text-align:right}
+  .top b{font-size:28px;color:#fff}.top b.low{color:#ff7a5c}
+  .reticle{position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-14px;border:1.5px solid rgba(255,255,255,.75);border-radius:50%}
+  .reticle::after{content:'';position:absolute;left:50%;top:50%;width:4px;height:4px;margin:-2px;border-radius:50%;background:#ff4a2e}
+  .msg{position:absolute;left:0;right:0;top:62%;text-align:center;font-size:26px;font-weight:bold;color:#ffe07a;animation:fade 1.8s forwards}
+  @keyframes fade{0%{opacity:0;transform:translateY(8px)}12%{opacity:1;transform:none}70%{opacity:1}100%{opacity:0}}
+  .ammo{position:absolute;left:max(22px,env(safe-area-inset-left));bottom:max(22px,env(safe-area-inset-bottom))}
+  .ammo em{display:block;margin-bottom:8px;font:16px Consolas,monospace;color:#ffe07a}
+  .ammo i{display:inline-block;width:14px;height:40px;margin-right:8px;border-radius:2px;opacity:.22;
+          background:linear-gradient(#b3261e 0 74%,#d8b24a 74%)}
+  .ammo i.on{opacity:1}
+
+  /* touch controls */
+  .tc button{position:absolute;pointer-events:auto;touch-action:none;padding:0;border-radius:50%;letter-spacing:1px;
+             font:bold 13px Consolas,monospace;color:#fff;background:rgba(20,26,18,.45);border:2px solid rgba(241,232,208,.6);
+             -webkit-tap-highlight-color:transparent}
+  .tc button:active{background:rgba(226,200,119,.55)}
+  .tc .fire{width:96px;height:96px;font-size:17px;background:rgba(179,38,30,.55);
+            right:max(22px,env(safe-area-inset-right));bottom:max(26px,env(safe-area-inset-bottom))}
+  .tc .aim{width:68px;height:68px;right:calc(max(22px,env(safe-area-inset-right)) + 104px);bottom:max(26px,env(safe-area-inset-bottom))}
+  .tc .aim.active{background:rgba(226,200,119,.7);color:#1a1f14}
+  .tc .reload{width:68px;height:68px;font-size:11px;right:calc(max(22px,env(safe-area-inset-right)) + 14px);bottom:calc(max(26px,env(safe-area-inset-bottom)) + 108px)}
+  .tc .pause{width:40px;height:40px;top:52px;right:max(16px,env(safe-area-inset-right))}
+
+  @media (max-width:640px),(max-height:520px){
+    .card{padding:16px 22px}
+    h1{font-size:30px}
+    .sub{margin:2px 0 10px;font-size:14px}
+    .stats{font-size:15px;margin-bottom:10px}
+    .keys{font-size:11.5px;margin-top:12px}
+    .guns{gap:8px;margin-bottom:10px}
+    .gun{padding:8px}.gun b{font-size:15px}.gun span{font-size:10.5px}
+    .menu{gap:8px}
+    .card button{font-size:18px;padding:10px 40px}
+    .top{font-size:14px;padding-top:6px}.top b{font-size:22px}
+    .msg{font-size:19px;top:30%}
+    .ammo i{width:10px;height:28px;margin-right:6px}
+    .tc .pause{top:40px}
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
