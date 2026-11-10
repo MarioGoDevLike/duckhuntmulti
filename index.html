@@ -10,8 +10,25 @@
   html,body,#root{margin:0;height:100%;overflow:hidden;background:#111;font-family:Georgia,'Times New Roman',serif;
                   user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none;overscroll-behavior:none}
   canvas{display:block;width:100vw;height:100vh;height:100dvh}
-  .account{margin-top:20px;padding-top:16px;border-top:1px solid rgba(241,232,208,.2)}
-  .account h2{margin:12px 0 8px;font-size:20px;font-weight:normal;letter-spacing:2px}
+  .menu-card{width:min(560px,100%)}
+  .tabs{display:flex;border-bottom:1px solid rgba(241,232,208,.25);margin:0 0 20px}
+  .tab{flex:1 1 auto;padding:10px 8px;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:#c9b98a;background:none;border:0;
+       border-bottom:2px solid transparent;border-radius:0;margin-bottom:-1px;white-space:nowrap}
+  .tab:hover{background:rgba(241,232,208,.06);color:#f1e8d0}
+  .tab.on{color:#ffd76a;border-bottom-color:#e2c877}
+  .tab:focus-visible,button:focus-visible{outline:2px solid #e2c877;outline-offset:2px}
+  .tabpanel{min-height:300px;display:flex;flex-direction:column;align-items:stretch}
+  .tabpanel>button{align-self:center}
+  .hint{font-size:14px;line-height:1.6;color:#b9c2a8;margin:0 0 16px}.hint b{color:#f1e8d0;font-weight:normal}
+  .empty{margin:auto;font-size:15px;line-height:1.8;color:#c9b98a}.empty button{margin-top:10px}
+  .or{margin:16px 0 10px;font-size:12px;letter-spacing:3px;text-transform:uppercase;color:#8f9a80}
+  .keys{margin:0;text-align:left}
+  .keys div{display:flex;justify-content:space-between;gap:16px;padding:9px 4px;border-bottom:1px solid rgba(241,232,208,.1)}
+  .keys dt{font:14px Consolas,monospace;color:#ffd76a}.keys dd{margin:0;font-size:15px}
+  .keys .hint{margin-top:16px}
+  .acct{margin-top:20px;padding-top:14px;border-top:1px solid rgba(241,232,208,.2);font-size:14px;color:#c9b98a}
+  .acct b{color:#f1e8d0;font-weight:normal}
+  button.link{font-size:13px;letter-spacing:0;padding:0 0 0 8px;color:#e2c877;background:none;text-decoration:underline}
   .who{font-size:14px;color:#c9b98a;margin-top:8px}
   .err{font-size:14px;color:#ff9a80;margin-top:8px}
   button.ghost{font-size:14px;letter-spacing:1px;padding:8px 18px;color:#f1e8d0;background:transparent;border:1px solid rgba(241,232,208,.5)}
@@ -32,7 +49,6 @@
   .sub{margin:6px 0 22px;font-style:italic;color:#c9b98a}
   .stats{font-size:19px;line-height:1.7;margin-bottom:18px}
   .stats b{color:#ffd76a}
-  .keys{font:14px/1.7 Consolas,monospace;color:#b9c2a8;margin:20px 0 0}
   .label{font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#c9b98a;margin-bottom:10px}
   .guns{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
   .gun{display:flex;flex-direction:column;gap:4px;padding:14px 12px;text-align:left;letter-spacing:0;font-size:15px;color:#f1e8d0;
@@ -41,14 +57,26 @@
   .gun.on{background:rgba(226,200,119,.22);border-color:#e2c877;box-shadow:inset 0 0 0 1px #e2c877}
   .gun b{font-size:18px;font-weight:normal}
   .gun small{font-style:italic;color:#c9b98a}
+  .gunpic{width:100%;height:64px;object-fit:cover;object-position:center 52%;border-radius:4px;
+    background:radial-gradient(ellipse at center,rgba(241,232,208,.55),rgba(241,232,208,.08) 75%)}
   .gun span{font:12px/1.5 Consolas,monospace;color:#b9c2a8}
   .menu{display:flex;flex-direction:column;align-items:center;gap:12px}
   .menu button.ghost{font-size:16px;padding:10px 0;width:220px}
   button:disabled{opacity:.4;cursor:default}
-  .rooms{margin-top:20px}
+  .rooms{display:flex;flex-direction:column;align-items:center}
   .rooms .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
   .rooms input{width:92px;padding:8px 10px;font:16px Consolas,monospace;letter-spacing:3px;text-align:center;text-transform:uppercase;
                color:#f1e8d0;background:rgba(0,0,0,.3);border:1px solid rgba(241,232,208,.5);border-radius:3px;user-select:text;-webkit-user-select:text}
+  .banner{position:fixed;top:56px;left:50%;transform:translateX(-50%);padding:8px 26px;border-radius:4px;white-space:nowrap;
+    font-size:26px;letter-spacing:3px;color:#ffd76a;background:rgba(20,22,16,.72);border:1px solid rgba(226,200,119,.6);pointer-events:none}
+  .endbar{position:fixed;left:0;right:0;bottom:0;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 20px;
+    padding:12px 20px calc(12px + env(safe-area-inset-bottom));color:#f1e8d0;background:linear-gradient(transparent,rgba(14,16,11,.88) 35%)}
+  .endstats{display:flex;flex-direction:column;gap:2px;font-size:16px;text-align:left}
+  .endstats>b{font-size:20px;letter-spacing:3px}.endstats span b{color:#ffd76a}
+  .rec{font:bold 11px Consolas,monospace;letter-spacing:1px;color:#1d1a12;background:#e2c877;padding:2px 6px;border-radius:3px;align-self:flex-start}
+  .endbtns{display:flex;gap:10px;align-items:center}
+  .endbtns button{font-size:16px;padding:10px 24px;letter-spacing:2px}
+  @media (max-width:640px){.banner{font-size:18px;top:46px}.endbar{justify-content:center}.endstats{font-size:13px;align-items:center;text-align:center}}
   .board.lobby{margin:6px 0 12px}
   .live{position:absolute;right:max(20px,env(safe-area-inset-right));top:56px;font-size:15px;text-align:right;line-height:1.6}
   .live .me{color:#ffe07a}
@@ -83,16 +111,27 @@
   .tc .reload{width:68px;height:68px;font-size:11px;right:calc(max(22px,env(safe-area-inset-right)) + 14px);bottom:calc(max(26px,env(safe-area-inset-bottom)) + 108px)}
   .tc .pause{width:40px;height:40px;top:52px;right:max(16px,env(safe-area-inset-right))}
 
+  .fs{position:fixed;z-index:30;top:max(12px,env(safe-area-inset-top));right:max(16px,env(safe-area-inset-right));width:40px;height:40px;padding:0;
+      display:grid;place-items:center;border-radius:50%;color:#f1e8d0;background:rgba(20,22,16,.6);border:1px solid rgba(241,232,208,.45);touch-action:manipulation}
+  .fs.inplay{top:52px;right:calc(max(16px,env(safe-area-inset-right)) + 50px)}
+  .fs svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .rotate{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;
+          text-align:center;color:#f1e8d0;background:rgba(10,13,9,.94)}
+  .rotate svg{width:84px;height:84px;fill:none;stroke:#e2c877;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;animation:turn 2.4s ease-in-out infinite}
+  .rotate b{font-size:22px;font-weight:normal;letter-spacing:2px}.rotate small{font-size:14px;color:#c9b98a;max-width:260px;line-height:1.5}
+  @keyframes turn{0%,25%{transform:rotate(0)}55%,85%{transform:rotate(-90deg)}100%{transform:rotate(0)}}
+  @media (prefers-reduced-motion:reduce){.rotate svg{animation:none}}
   @media (max-width:640px),(max-height:520px){
+    .fs.inplay{top:40px}
     .card{padding:16px 22px}
     h1{font-size:30px}
     .sub{margin:2px 0 10px;font-size:14px}
     .stats{font-size:15px;margin-bottom:10px}
-    .keys{font-size:11.5px;margin-top:12px}
     .guns{gap:8px;margin-bottom:10px}
-    .gun{padding:8px}.gun b{font-size:15px}.gun span{font-size:10.5px}
+    .gun{padding:8px}.gun b{font-size:15px}.gun span{font-size:10.5px}.gunpic{height:40px}
     .menu{gap:8px}
-    .card button{font-size:18px;padding:10px 40px}
+    .card button:not(.gun):not(.tab):not(.link){font-size:18px;padding:10px 40px}
+    .tab{font-size:11px;letter-spacing:.5px;padding:9px 2px}.tabs{margin-bottom:14px}.tabpanel{min-height:0}
     .top{font-size:14px;padding-top:6px}.top b{font-size:22px}
     .msg{font-size:19px;top:30%}
     .ammo i{width:10px;height:28px;margin-right:6px}
