@@ -5,12 +5,70 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Marsh Dawn — Duck Hunt</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500&family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
+<title>Open Season — Bird Hunting</title>
 <style>
   html,body,#root{margin:0;height:100%;overflow:hidden;background:#111;font-family:Georgia,'Times New Roman',serif;
                   user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none;overscroll-behavior:none}
   canvas{display:block;width:100vw;height:100vh;height:100dvh}
-  .menu-card{width:min(560px,100%)}
+  /* ---- main menu: a command panel over the live scene ---- */
+  .menu-screen{position:fixed;inset:0;color:#efe6cf;font-family:Barlow,system-ui,sans-serif;
+    background:linear-gradient(90deg,rgba(8,10,7,.94) 0,rgba(8,10,7,.86) 34%,rgba(8,10,7,.35) 62%,rgba(8,10,7,0) 80%)}
+  .menu-panel{position:absolute;inset:0 auto 0 0;width:min(620px,100%);box-sizing:border-box;display:flex;flex-direction:column;
+    padding:max(34px,env(safe-area-inset-top)) 44px max(22px,env(safe-area-inset-bottom)) max(44px,env(safe-area-inset-left));overflow-y:auto;touch-action:pan-y}
+  .menu-panel{scrollbar-width:thin;scrollbar-color:rgba(226,200,119,.35) transparent}
+  .menu-panel::-webkit-scrollbar{width:6px}.menu-panel::-webkit-scrollbar-thumb{background:rgba(226,200,119,.35);border-radius:3px}
+  .brand .kicker{font:600 13px 'Barlow Condensed',sans-serif;letter-spacing:4px;text-transform:uppercase;color:#c9a95a}
+  .brand h1{margin:4px 0 2px;font:700 54px/1 Cinzel,Georgia,serif;letter-spacing:3px;color:#f4ead2;text-shadow:0 2px 18px rgba(0,0,0,.6)}
+  .brand .tagline{font:500 15px 'Barlow Condensed',sans-serif;letter-spacing:2px;color:#9fa98d;margin-bottom:22px}
+  .menu-panel .tabs{display:flex;gap:26px;border-bottom:1px solid rgba(239,230,207,.14);margin:0 0 18px}
+  .menu-panel .tab{flex:none;padding:10px 0;font:600 15px 'Barlow Condensed',sans-serif;letter-spacing:2px;color:#9fa98d}
+  .menu-panel .tab.on{color:#f4ead2;border-bottom-color:#e2c877}
+  .menu-panel .tabpanel{flex:1 0 auto;min-height:0;display:block}
+  .sect{display:flex;align-items:center;gap:12px;margin:4px 0 10px;font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:3px;text-transform:uppercase;color:#c9a95a}
+  .sect::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,rgba(201,169,90,.45),transparent)}
+  .cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:18px}
+  .cards.three{grid-template-columns:repeat(3,1fr)}
+  .pick{display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:0 0 10px;text-align:left;letter-spacing:0;color:#efe6cf;
+    background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015));border:1px solid rgba(239,230,207,.13);border-radius:6px;
+    overflow:hidden;transition:border-color .15s,transform .15s,background .15s}
+  .pick:hover{border-color:rgba(226,200,119,.5);transform:translateY(-2px);background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.02))}
+  .pick.on{border-color:#e2c877;background:linear-gradient(180deg,rgba(226,200,119,.16),rgba(226,200,119,.04));box-shadow:0 0 0 1px #e2c877,0 8px 24px rgba(0,0,0,.35)}
+  .pick>b{margin:8px 12px 0;font:700 19px 'Barlow Condensed',sans-serif;letter-spacing:1px}
+  .pick>small{margin:0 12px 6px;font-size:12.5px;line-height:1.35;color:#a9ad97;min-height:2.7em}
+  .pic{position:relative;display:block;height:96px;background:radial-gradient(ellipse at 50% 60%,rgba(239,230,207,.16),rgba(0,0,0,0) 70%),#14170f}
+  .pic img{width:100%;height:100%;object-fit:contain;display:block}
+  .pic.gunshot{height:70px;background:radial-gradient(ellipse at center,rgba(239,230,207,.5),rgba(239,230,207,.06) 72%),#1b1e16}
+  .pic.gunshot img{object-fit:cover;object-position:center 52%}
+  .pic em{position:absolute;top:6px;right:6px;font:600 11px 'Barlow Condensed',sans-serif;font-style:normal;letter-spacing:1px;padding:2px 6px;border-radius:3px;
+    color:#1a1d12;background:#e2c877}
+  .rating{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 12px 0;font:500 11.5px 'Barlow Condensed',sans-serif;letter-spacing:1px;
+    text-transform:uppercase;color:#8f9780}
+  .rating i{display:flex;gap:3px}.rating b{width:12px;height:4px;border-radius:2px;background:rgba(239,230,207,.14)}.rating b.on{background:#e2c877}
+  .launch{position:sticky;bottom:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:6px;padding:14px 16px;border-radius:8px;
+    background:linear-gradient(rgba(226,200,119,.08),rgba(226,200,119,.08)),rgba(14,16,11,.94);border:1px solid rgba(226,200,119,.32);box-shadow:0 -10px 24px rgba(8,10,7,.7)}
+  .loadout{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .loadout small{font:500 12px 'Barlow Condensed',sans-serif;letter-spacing:2px;text-transform:uppercase;color:#8f9780}
+  .loadout small span{color:#ffd76a}
+  .loadout b{font:700 20px 'Barlow Condensed',sans-serif;letter-spacing:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  button.cta{flex:none;padding:14px 34px;font:700 20px 'Barlow Condensed',sans-serif;letter-spacing:3px;text-transform:uppercase;color:#17190f;
+    background:linear-gradient(180deg,#f0d78a,#d8b65e);border-radius:5px;box-shadow:0 6px 18px rgba(216,182,94,.25)}
+  button.cta:hover{background:linear-gradient(180deg,#ffe49a,#e2c06a)}
+  .menu-panel .rooms{align-items:stretch}.menu-panel .rooms .cta{align-self:flex-start}.menu-panel .rooms .row{justify-content:flex-start}
+  .menu-panel .or{text-align:left}
+  .menu-foot .acct{margin-top:16px;padding-top:12px;font-family:Barlow,sans-serif;font-size:13px}
+  .menu-panel .keys dt{font-family:'Barlow Condensed',sans-serif;font-weight:600;letter-spacing:1px;font-size:15px}
+  @media (max-width:640px),(max-height:520px){
+    .menu-screen{background:rgba(8,10,7,.86)}
+    .menu-panel{width:100%;padding:16px 16px max(14px,env(safe-area-inset-bottom))}
+    .brand h1{font-size:34px}.brand .tagline{margin-bottom:12px;font-size:13px}.brand .kicker{font-size:11px;letter-spacing:3px}
+    .menu-panel .tabs{gap:16px;margin-bottom:12px}.menu-panel .tab{font-size:13px;letter-spacing:1px;padding:8px 0}
+    .cards{gap:6px;margin-bottom:12px}.pick>b{font-size:15px;margin:6px 8px 0}.pick>small{display:none}
+    .pic{height:62px}.pic.gunshot{height:46px}.rating{margin:2px 8px 0;font-size:10px}.rating b{width:8px}
+    .launch{padding:10px 12px}.loadout b{font-size:16px}button.cta{padding:11px 20px;font-size:16px}
+  }
+  @media (min-width:641px) and (max-height:520px){.menu-panel{width:min(560px,100%)}.menu-screen{background:linear-gradient(90deg,rgba(8,10,7,.92) 0,rgba(8,10,7,.8) 55%,rgba(8,10,7,0) 85%)}}
   .tabs{display:flex;border-bottom:1px solid rgba(241,232,208,.25);margin:0 0 20px}
   .tab{flex:1 1 auto;padding:10px 8px;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;color:#c9b98a;background:none;border:0;
        border-bottom:2px solid transparent;border-radius:0;margin-bottom:-1px;white-space:nowrap}
@@ -50,16 +108,6 @@
   .stats{font-size:19px;line-height:1.7;margin-bottom:18px}
   .stats b{color:#ffd76a}
   .label{font-size:13px;letter-spacing:3px;text-transform:uppercase;color:#c9b98a;margin-bottom:10px}
-  .guns{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:18px}
-  .gun{display:flex;flex-direction:column;gap:4px;padding:14px 12px;text-align:left;letter-spacing:0;font-size:15px;color:#f1e8d0;
-       background:rgba(241,232,208,.06);border:1px solid rgba(241,232,208,.3)}
-  .gun:hover{background:rgba(241,232,208,.14)}
-  .gun.on{background:rgba(226,200,119,.22);border-color:#e2c877;box-shadow:inset 0 0 0 1px #e2c877}
-  .gun b{font-size:18px;font-weight:normal}
-  .gun small{font-style:italic;color:#c9b98a}
-  .gunpic{width:100%;height:64px;object-fit:cover;object-position:center 52%;border-radius:4px;
-    background:radial-gradient(ellipse at center,rgba(241,232,208,.55),rgba(241,232,208,.08) 75%)}
-  .gun span{font:12px/1.5 Consolas,monospace;color:#b9c2a8}
   .menu{display:flex;flex-direction:column;align-items:center;gap:12px}
   .menu button.ghost{font-size:16px;padding:10px 0;width:220px}
   button:disabled{opacity:.4;cursor:default}
@@ -94,6 +142,8 @@
   .msg{position:absolute;left:0;right:0;top:62%;text-align:center;font-size:26px;font-weight:bold;color:#ffe07a;animation:fade 1.8s forwards}
   @keyframes fade{0%{opacity:0;transform:translateY(8px)}12%{opacity:1;transform:none}70%{opacity:1}100%{opacity:0}}
   .ammo{position:absolute;left:max(22px,env(safe-area-inset-left));bottom:max(22px,env(safe-area-inset-bottom))}
+  .grab{position:absolute;left:50%;top:58%;transform:translateX(-50%);padding:6px 14px;border-radius:4px;font:15px Consolas,monospace;color:#ffe07a;background:rgba(10,12,8,.55);white-space:nowrap}
+  .tc .grabbtn{width:84px;height:44px;border-radius:22px;font-size:11px;left:50%;transform:translateX(-50%);bottom:max(26px,env(safe-area-inset-bottom))}
   .ammo em{display:block;margin-bottom:8px;font:16px Consolas,monospace;color:#ffe07a}
   .ammo i{display:inline-block;width:14px;height:40px;margin-right:8px;border-radius:2px;opacity:.22;
           background:linear-gradient(#b3261e 0 74%,#d8b24a 74%)}
@@ -127,10 +177,8 @@
     h1{font-size:30px}
     .sub{margin:2px 0 10px;font-size:14px}
     .stats{font-size:15px;margin-bottom:10px}
-    .guns{gap:8px;margin-bottom:10px}
-    .gun{padding:8px}.gun b{font-size:15px}.gun span{font-size:10.5px}.gunpic{height:40px}
     .menu{gap:8px}
-    .card button:not(.gun):not(.tab):not(.link){font-size:18px;padding:10px 40px}
+    .card button:not(.pick):not(.tab):not(.link){font-size:18px;padding:10px 40px}
     .tab{font-size:11px;letter-spacing:.5px;padding:9px 2px}.tabs{margin-bottom:14px}.tabpanel{min-height:0}
     .top{font-size:14px;padding-top:6px}.top b{font-size:22px}
     .msg{font-size:19px;top:30%}

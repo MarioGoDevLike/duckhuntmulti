@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
+import { makeSemiAuto, makeOverUnder, OU_BARRELS, makeDuck, makeFinch, makeThrush } from './models.js';
 import duckSoundUrl from './assets/duck_sound.mp3';
+import finchSoundUrl from './assets/fringello_calls.mp3';   // 24 song phrases cut from fringello_sound.mp3
+import thrushSoundUrl from './assets/thrush_calls.mp3';     // 24 song phrases cut from thrush_sound.mp3
+import semiShotUrl from './assets/semi_shot.wav';           // one clean shot cut from semi_automatic_sound.mp3
+import ouShotUrl from './assets/over_under_shot.wav';      // one clean shot cut from 'SHOTGUN over under.mp3'
 
 export const GAME_TIME = 120;
 // Semi-auto: 5 in the tube, loaded one shell at a time. Over-under: two stacked barrels, breaks open and takes a fresh pair.
@@ -8,8 +13,19 @@ export const WEAPONS = {
   semi: { name: 'Beretta A400', type: 'Semi-auto 12 ga', desc: '5 shells · quick follow-up shots · loads one shell at a time', mag: 5, interval: 0.22, reload: 0.55, single: true },
   double: { name: 'Over-under', type: 'Over-under 12 ga', desc: '2 shells · instant second barrel · breaks open and reloads both', mag: 2, interval: 0.12, reload: 1.3, single: false },
 };
+// What is being hunted. hitR/reach/fade: how big the bird is to the shot column and how fast the pattern thins
+// with range; pts: score multiplier; bag: how the birds are laid out on the grass afterwards.
+export const QUARRY = {
+  duck: { kind: 'duck', name: 'Mallard', line: 'Steady flights over the marsh', speed: 3, skill: 2, desc: 'Marsh ducks · steady, straight flight · longer shots', one: 'duck', many: 'ducks',
+          hitR: 0.26, reach: 64, fade: 24, pts: 1, rest: 0.12, open: false, grove: false, upturn: false, gap: [1.6, 3.6], bag: { cols: 6, dx: 0.46, dz: 0.9, front: -2.4 } },
+  finch: { kind: 'finch', name: 'Fringello', line: 'Bounding flocks over open ground', speed: 3, skill: 5, desc: 'Chaffinch flocks · bounding, jinking flight · short, quick shots', one: 'bird', many: 'birds',
+           hitR: 0.15, reach: 46, fade: 16, pts: 1.6, rest: 0.05, open: true, grove: false, upturn: true, gap: [6, 9], bag: { cols: 8, dx: 0.24, dz: 0.42, front: -1.8 } },
+  thrush: { kind: 'thrush', name: 'Thrush', line: 'Bursts from the trees, one by one', speed: 5, skill: 4, desc: 'Summan · bursts out of the trees one at a time · fast, direct flight', one: 'thrush', many: 'thrushes',
+            hitR: 0.19, reach: 52, fade: 18, pts: 1.3, rest: 0.06, open: false, grove: true, upturn: true, gap: [1.4, 3.2],
+            bag: { cols: 6, dx: 0.32, dz: 0.55, front: -2.0 } },
+};
 export const TOUCH = matchMedia('(hover: none), (pointer: coarse)').matches; // phones and tablets
-const OU_BARRELS = [-0.0055, 0.018]; // bottom and top barrel heights in the gun model
+const PITCH_MIN = -1.2, PITCH_MAX = 1.45; // look down to the birds at your feet, up to almost overhead
 const SHOT_SPEED = 370, EYE = 1.7, TAU = Math.PI * 2; // m/s, m
 const rnd = (a, b) => a + Math.random() * (b - a);
 // Seeded generator: every player in a room gets the same flights from the same seed.
@@ -42,19 +58,6 @@ function grassTexture() {
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(400, 400); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
   return t;
 }
-// Grey laminated wood: thin dyed layers, cut at a slant so they show as wavy bands.
-function laminateTexture() {
-  const c = document.createElement('canvas'); c.width = c.height = 256;
-  const g = c.getContext('2d'); g.fillStyle = '#4b4b49'; g.fillRect(0, 0, 256, 256);
-  for (let y = -40; y < 300; y += rnd(3, 9)) {
-    const l = rnd(26, 50), a = rnd(4, 14), f = rnd(0.01, 0.03), p = rnd(0, 6);
-    g.strokeStyle = `hsl(40,4%,${l}%)`; g.lineWidth = rnd(2, 5); g.beginPath();
-    for (let x = 0; x <= 256; x += 8) g.lineTo(x, y + Math.sin(x * f + p) * a + x * 0.12);
-    g.stroke();
-  }
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
-  return t;
-}
 // Floating text: first line in the given colour, any further lines smaller and gold.
 function labelSprite(lines, color = '#f1e8d0', width = 1.2) {
   const c = document.createElement('canvas'); c.width = 512; c.height = 64 * lines.length;
@@ -78,39 +81,70 @@ function flashTexture() {
 /* ---------- shared duck parts ---------- */
 const sph = new THREE.SphereGeometry(1, 12, 9), box = new THREE.BoxGeometry(1, 1, 1);
 const cylZ = new THREE.CylinderGeometry(1, 1, 1, 14).rotateX(Math.PI / 2);     // axis along z
-const coneB = new THREE.ConeGeometry(1, 1, 6).rotateX(-Math.PI / 2);          // apex toward -z
-const torus = new THREE.TorusGeometry(1, 0.13, 8, 20).rotateY(Math.PI / 2);   // ring in the y-z plane
-const wingGeo = pts => new THREE.ShapeGeometry(new THREE.Shape(pts.map(p => new THREE.Vector2(p[0], p[1])))).rotateX(Math.PI / 2);
-const innerG = wingGeo([[0, -0.09], [0.2, -0.08], [0.2, 0.07], [0, 0.08]]);
-const outerG = wingGeo([[0, -0.08], [0.1, -0.085], [0.29, -0.04], [0.13, 0.055], [0, 0.07]]);
 const L = color => new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide });
-const M = {
-  grey: L(0xa9a59b), brown: L(0x8a6a44), dark: L(0x4a4038), green: L(0x16502f), white: L(0xf2f0e6), chest: L(0x5b3322),
-  bill: L(0xd9b02a), billH: L(0xb87a2c), blue: L(0x2c49a6), wingD: L(0x77726a), wingH: L(0x6b5235),
-};
 function part(parent, geo, mat, sx, sy, sz, x, y, z) {
   const o = new THREE.Mesh(geo, mat); o.scale.set(sx, sy, sz); o.position.set(x, y, z); parent.add(o); return o;
 }
-// Mallard facing +z, wings jointed at shoulder and wrist.
-function makeDuck(drake) {
-  const g = new THREE.Group(), body = drake ? M.grey : M.brown, head = drake ? M.green : M.brown;
-  part(g, sph, body, 0.1, 0.09, 0.25, 0, 0, 0);
-  if (drake) part(g, sph, M.chest, 0.092, 0.085, 0.12, 0, -0.005, 0.15);
-  part(g, coneB, M.dark, 0.07, 0.03, 0.2, 0, 0.01, -0.28);
-  part(g, cylZ, head, 0.032, 0.032, 0.2, 0, 0.02, 0.31);
-  if (drake) part(g, cylZ, M.white, 0.034, 0.034, 0.016, 0, 0.02, 0.36);
-  part(g, sph, head, 0.045, 0.045, 0.058, 0, 0.03, 0.43);
-  part(g, box, drake ? M.bill : M.billH, 0.036, 0.014, 0.07, 0, 0.022, 0.5);
-  const wings = [];
-  for (const side of [1, -1]) {
-    const s = new THREE.Group(), inner = new THREE.Group(), outer = new THREE.Group();
-    s.scale.x = side; s.position.set(side * 0.08, 0.045, 0.04); outer.position.x = 0.2;
-    inner.add(new THREE.Mesh(innerG, drake ? M.wingD : M.wingH)); outer.add(new THREE.Mesh(outerG, M.dark));
-    part(inner, box, M.blue, 0.15, 0.006, 0.04, 0.11, 0, -0.065);
-    inner.add(outer); s.add(inner); g.add(s); wings.push([inner, outer]);
+const makeBird = (kind, male) => ({ ...(kind === 'finch' ? makeFinch(male) : kind === 'thrush' ? makeThrush() : makeDuck(male)), kind });
+// Wings closed: the arm swings back along the body (a small bird's drops down against the flank) and the hand lies back along it.
+function foldWings(d) {
+  const finch = d.kind === 'finch' || d.kind === 'thrush'; // small birds tuck the wings down over the flanks
+  for (const [a, b] of d.wings) {
+    // Small birds roll the closed wing onto its edge (about its own length), leading edge up, before swinging it
+    // back, and drop it to the flank so it lies against the body; ducks keep it folded flat over the back.
+    a.rotation.order = 'ZYX'; a.rotation.set(finch ? -1.3 : 0, finch ? 1.42 : 1.35, 0); a.position.y = -(d.foldDrop || 0); a.scale.z = finch ? 0.45 : 1; // feathers stack as the wing closes b.rotation.set(0, finch ? 0.05 : 0.2, 0);
   }
-  g.scale.setScalar(1.4);
-  return { g, wings, drake };
+}
+
+/* ---------- retriever ---------- */
+// Yellow Labrador facing +z, standing on y = 0. Legs pivot at the hip and shoulder so they can gallop; the head
+// carries a "mouth" point where a retrieved bird is held.
+function makeDog() {
+  const coat = new THREE.MeshStandardMaterial({ color: 0xd2a35c, roughness: 0.9 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0xa87a3c, roughness: 0.9 });
+  const nose = new THREE.MeshStandardMaterial({ color: 0x1b1714, roughness: 0.5 });
+  const g = new THREE.Group(), cap = (r, len, mat) => new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 12), mat);
+  const body = cap(0.15, 0.42, coat); body.rotation.x = Math.PI / 2; body.position.set(0, 0.5, 0); g.add(body);
+  const chest = cap(0.14, 0.12, coat); chest.position.set(0, 0.52, 0.24); g.add(chest);
+  const neck = cap(0.085, 0.16, coat); neck.position.set(0, 0.66, 0.33); neck.rotation.x = 0.7; g.add(neck);
+  const head = new THREE.Group(); head.position.set(0, 0.78, 0.42); g.add(head);
+  part(head, sph, coat, 0.1, 0.095, 0.11, 0, 0, 0);
+  part(head, box, coat, 0.085, 0.075, 0.14, 0, -0.03, 0.1);              // muzzle
+  part(head, sph, nose, 0.026, 0.022, 0.02, 0, -0.005, 0.175);
+  for (const x of [-1, 1]) {
+    part(head, sph, nose, 0.012, 0.012, 0.012, x * 0.055, 0.03, 0.08);    // eyes
+    const ear = part(head, box, dark, 0.02, 0.11, 0.075, x * 0.095, -0.03, -0.01); ear.rotation.z = x * 0.18;
+  }
+  const legs = [];
+  for (const [x, z] of [[-0.09, 0.22], [0.09, 0.22], [-0.09, -0.2], [0.09, -0.2]]) {
+    const hip = new THREE.Group(); hip.position.set(x, 0.48, z); g.add(hip);
+    const leg = cap(0.045, 0.36, coat); leg.position.y = -0.24; hip.add(leg); legs.push(hip);
+  }
+  const tail = new THREE.Group(); tail.position.set(0, 0.56, -0.34); g.add(tail);
+  const t = cap(0.035, 0.3, coat); t.position.set(0, 0, -0.17); t.rotation.x = Math.PI / 2 + 0.5; tail.add(t);
+  return { g, legs, tail, head, body, mouth: new THREE.Vector3(0, -0.06, 0.2) };
+}
+
+// Studio portraits of each quarry, rendered once from the game's own models for the menu cards.
+export function birdPortraits(w = 360, h = 220) {
+  const out = {};
+  let r;
+  try {
+    r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    r.setSize(w, h, false); r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 0.95;
+    const scene = new THREE.Scene(), cam = new THREE.PerspectiveCamera(28, w / h, 0.01, 50);
+    scene.add(new THREE.HemisphereLight(0xfff3e0, 0x4d4834, 2.4));
+    const key = new THREE.DirectionalLight(0xffe4c4, 2.8); key.position.set(2, 3, 3); scene.add(key);
+    const rim = new THREE.DirectionalLight(0xbfd4ff, 1.6); rim.position.set(-3, 1.5, -2); scene.add(rim);
+    for (const kind of Object.keys(QUARRY)) {
+      const d = makeBird(kind, true); foldWings(d); d.g.rotation.set(0.08, -1.0, 0); scene.add(d.g);
+      const box = new THREE.Box3().setFromObject(d.g), c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3()).length();
+      cam.position.set(c.x + size * 0.08, c.y + size * 0.22, c.z + size * 1.05); cam.lookAt(c);
+      r.render(scene, cam); out[kind] = r.domElement.toDataURL('image/png'); scene.remove(d.g);
+    }
+  } catch (e) { console.warn('Bird portraits unavailable', e); }
+  r?.dispose(); r?.forceContextLoss();
+  return out;
 }
 
 /* ---------- first-person hands ---------- */
@@ -262,15 +296,41 @@ function makeAudio() {
   const gust = ac.createOscillator(), gg = ac.createGain(); gust.frequency.value = 0.07; gg.gain.value = 0.025; // slow gusts
   gust.connect(gg).connect(wg.gain); gust.start();
 
-  let calls = null, voices = 0;
-  fetch(duckSoundUrl).then(r => r.arrayBuffer()).then(b => ac.decodeAudioData(b))
-    .then(b => { calls = { b, cuts: findCalls(b) }; })
-    .catch(e => console.warn('Duck recording unavailable, using synthesised calls', e));
+  // Recordings, each decoded once. Bird recordings are split into single calls; any that fails to load falls
+  // back to the synthesised sound below.
+  const rec = {};
+  const load = (key, url, split) => fetch(url).then(r => r.arrayBuffer()).then(b => ac.decodeAudioData(b))
+    .then(b => { rec[key] = { b, cuts: split ? findCalls(b) : null }; })
+    .catch(e => console.warn(key + ' recording unavailable, using the synthesised sound', e));
+  load('duck', duckSoundUrl, true); load('finch', finchSoundUrl, true); load('thrush', thrushSoundUrl, true); load('shot', semiShotUrl, false); load('ouShot', ouShotUrl, false);
+  let voices = 0;
+  // One random call from a recording, pitched a little per bird.
+  const playCall = (key, dst, n) => {
+    const { b, cuts } = rec[key], [a, len] = cuts[Math.random() * cuts.length | 0];
+    const src = ac.createBufferSource(), g = ac.createGain();
+    src.buffer = b; src.playbackRate.value = rnd(0.97, 1.04); // natural speed; just enough variation that birds differ
+    const dur = len / src.playbackRate.value;
+    g.gain.setValueAtTime(0, n); g.gain.linearRampToValueAtTime(1, n + 0.01);
+    g.gain.setValueAtTime(1, n + dur - 0.04); g.gain.linearRampToValueAtTime(0, n + dur);
+    src.connect(g).connect(dst); src.start(n, a, len); voices++; src.onended = () => voices--;
+  };
+  const playBuffer = (key, dst, n, rate = 1) => {
+    const src = ac.createBufferSource(); src.buffer = rec[key].b; src.playbackRate.value = rate; src.connect(dst); src.start(n);
+  };
   const synthQuack = (dst, n) => {
     const f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1150; f.Q.value = 5; f.connect(dst);
     for (let i = 0, c = 2 + (Math.random() * 3 | 0); i < c; i++) {
       const len = 0.13 - i * 0.015; tone(f, n, 1, 560 - i * 25, 360, len, 'sawtooth'); n += len + 0.05;
     }
+  };
+  // Synthesised report, used only if a gun's recording is unavailable.
+  const synthShot = n => {
+    const b = bus({ send: 0.55 });
+    noise(b, n, 1.0, 'highpass', 3500, 2500, 0.012);             // crack: shock wave off the shot column
+    noise(b, n, 1.0, 'lowpass', 9000, 260, 0.45, 0.6, 0.0015);   // muzzle blast
+    noise(b, n + 0.004, 0.6, 'bandpass', 1400, 500, 0.22, 0.9); // gas roar off the muzzle
+    tone(b, n, 1.0, 120, 38, 0.24);                              // thump felt through the stock
+    tone(b, n, 0.5, 62, 30, 0.38);
   };
   const lp = new THREE.Vector3(), lf = new THREE.Vector3();
 
@@ -287,12 +347,12 @@ function makeAudio() {
     },
     // Our own gun. semi: the action cycles and spits the hull; the over-under just settles its hammer.
     shot(semi) {
-      const n = ac.currentTime, b = bus({ send: 0.55 });
-      noise(b, n, 1.0, 'highpass', 3500, 2500, 0.012);             // crack: shock wave off the shot column
-      noise(b, n, 1.0, 'lowpass', 9000, 260, 0.45, 0.6, 0.0015);   // muzzle blast
-      noise(b, n + 0.004, 0.6, 'bandpass', 1400, 500, 0.22, 0.9); // gas roar off the muzzle
-      tone(b, n, 1.0, 120, 38, 0.24);                              // thump felt through the stock
-      tone(b, n, 0.5, 62, 30, 0.38);
+      const n = ac.currentTime;
+      const key = semi ? 'shot' : 'ouShot';
+      if (rec[key]) {                                              // the recorded gun, with a little extra weight underneath
+        playBuffer(key, bus({ send: 0.22 }), n, rnd(0.98, 1.02));
+        tone(bus({ send: 0, gain: 0.55 }), n, 1.0, 85, 34, 0.26);
+      } else synthShot(n);
       const mech = bus({ pan: 0.25, send: 0.08, gain: 0.8 });
       if (semi) {
         clack(mech, n + 0.045, 2300, 0.5);      // bolt slams back, hull ejects
@@ -303,7 +363,8 @@ function makeAudio() {
     // Another hunter down the line: quieter, darker, from where they stand.
     distantShot(at) {
       const n = ac.currentTime, b = bus({ at, send: 0.8, gain: 0.9, lp: 3500 });
-      noise(b, n, 1.0, 'lowpass', 6000, 250, 0.5, 0.6, 0.002); tone(b, n, 0.7, 110, 40, 0.3);
+      if (rec.shot) playBuffer('shot', b, n, rnd(0.96, 1.02)); // the same report, darker and from where they stand
+      else { noise(b, n, 1.0, 'lowpass', 6000, 250, 0.5, 0.6, 0.002); tone(b, n, 0.7, 110, 40, 0.3); }
     },
     empty: () => clack(bus({ pan: 0.2, send: 0.05 }), ac.currentTime, 2600, 0.45), // hammer falls on nothing
     open: () => clack(bus({ send: 0.05, gain: 0.7 }), ac.currentTime, 1000, 0.5), // over-under breaks open
@@ -314,18 +375,30 @@ function makeAudio() {
       else { clack(b, n, 1200, 0.6); clack(b, n + 0.03, 2800, 0.35); }
     },
     thud(at) { const n = ac.currentTime, b = bus({ at, send: 0.1, gain: 1.4 }); tone(b, n, 0.6, 90, 40, 0.15); noise(b, n, 0.4, 'lowpass', 800, 200, 0.12); },
+    // Chaffinch flight call: a bright, quick "pink", sometimes doubled.
+    chirp(at, vol = 1) { // a phrase from the chaffinch recording, else a synthesised "pink"
+      if (voices >= 5 || ac.state !== 'running') return;
+      const n = ac.currentTime;
+      if (rec.finch) { playCall('finch', bus({ at, send: 0.15, gain: vol * 1.3 }), n); return; }
+      const b = bus({ at, send: 0.15, gain: vol * 0.5 });
+      for (let i = 0, c = Math.random() < 0.5 ? 1 : 2; i < c; i++) {
+        const t = n + i * 0.11, f = rnd(4600, 5400);
+        tone(b, t, 0.8, f, f * 0.82, 0.045); tone(b, t, 0.25, f * 2, f * 1.6, 0.03);
+      }
+    },
+    // Song thrush flight call: a thin, high "tsip".
+    tsip(at, vol = 1) { // a phrase from the thrush recording, else a synthesised "tsip"
+      if (voices >= 5 || ac.state !== 'running') return;
+      const n = ac.currentTime;
+      if (rec.thrush) { playCall('thrush', bus({ at, send: 0.2, gain: vol * 1.3 }), n); return; }
+      const b = bus({ at, send: 0.2, gain: vol * 0.45 }), f = rnd(7000, 7800);
+      tone(b, n, 0.8, f, f * 0.9, 0.05); tone(b, n + 0.004, 0.2, f * 1.5, f * 1.3, 0.035);
+    },
     // A real call from the recording, played from where the bird is, pitched a little per bird.
     quack(at, vol = 1) {
       if (voices >= 5 || ac.state !== 'running') return;
       const n = ac.currentTime, dst = bus({ at, send: 0.12, gain: vol * 1.6 });
-      if (!calls) { synthQuack(dst, n); return; }
-      const [a, len] = calls.cuts[Math.random() * calls.cuts.length | 0];
-      const s = ac.createBufferSource(), g = ac.createGain();
-      s.buffer = calls.b; s.playbackRate.value = rnd(0.97, 1.04); // natural speed; just enough variation that birds differ
-      const dur = len / s.playbackRate.value;
-      g.gain.setValueAtTime(0, n); g.gain.linearRampToValueAtTime(1, n + 0.01);
-      g.gain.setValueAtTime(1, n + dur - 0.04); g.gain.linearRampToValueAtTime(0, n + dur);
-      s.connect(g).connect(dst); s.start(n, a, len); voices++; s.onended = () => voices--;
+      if (rec.duck) playCall('duck', dst, n); else synthQuack(dst, n);
     },
   };
 }
@@ -396,6 +469,7 @@ export function createGame(canvas, cb) {
       grass.instanceMatrix.needsUpdate = true;
     };
   }
+  const trees = []; // hidden for quarry hunted on open ground
   const addTrees = (geo, n, hue) => {
     const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial(), n);
     for (let i = 0; i < n; i++) {
@@ -405,87 +479,33 @@ export function createGame(canvas, cb) {
       m.position.set(x, groundH(x, z), z); m.rotation.set(0, rnd(0, 6), 0); m.scale.set(s, s * rnd(0.9, 1.4), s); m.updateMatrix();
       mesh.setMatrixAt(i, m.matrix); mesh.setColorAt(i, col.setHSL(hue + rnd(-0.03, 0.03), rnd(0.3, 0.5), rnd(0.12, 0.22)));
     }
-    scene.add(mesh);
+    scene.add(mesh); trees.push(mesh);
   };
   addTrees(new THREE.ConeGeometry(3, 13, 7).translate(0, 6.5, 0), 700, 0.33);
   addTrees(new THREE.IcosahedronGeometry(4.5, 1).scale(1, 1.2, 1).translate(0, 5, 0), 500, 0.27);
+  // Thrush stand: a belt of olive-like trees 34–62 m in front of the line, where the birds come out of.
+  const grove = new THREE.Group(); grove.visible = false; scene.add(grove);
+  {
+    const N = 90, trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.16, 0.26, 2.6, 7).translate(0, 1.3, 0),
+      new THREE.MeshLambertMaterial({ color: 0x5c5248 }), N);
+    const crown = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(2.3, 1).scale(1.25, 0.8, 1.25).translate(0, 3.6, 0),
+      new THREE.MeshLambertMaterial(), N);
+    for (let i = 0; i < N; i++) {
+      const x = -55 + (i % 15) * 7.6 + rnd(-2.4, 2.4), z = -36 - (i / 15 | 0) * 4.6 + rnd(-1.6, 1.6), k = rnd(0.8, 1.25);
+      m.position.set(x, groundH(x, z), z); m.rotation.set(0, rnd(0, TAU), 0); m.scale.set(k, k * rnd(0.85, 1.15), k); m.updateMatrix();
+      trunk.setMatrixAt(i, m.matrix); crown.setMatrixAt(i, m.matrix);
+      crown.setColorAt(i, col.setHSL(rnd(0.2, 0.26), rnd(0.18, 0.3), rnd(0.28, 0.38)));
+    }
+    grove.add(trunk, crown);
+  }
 
   // First-person guns, built along -z. Both keep the bead at the same height so the aiming pose lines up.
   const gun = new THREE.Group(); camera.add(gun);
   const metal = new THREE.MeshStandardMaterial({ color: 0x1c1d20, metalness: 0.7, roughness: 0.4, envMapIntensity: 0.5 });
-  const recv = new THREE.MeshStandardMaterial({ color: 0x2b2c2f, metalness: 0.6, roughness: 0.45, envMapIntensity: 0.4 });
   const wood = new THREE.MeshStandardMaterial({ color: 0x5a3216, roughness: 0.55, envMapIntensity: 0.4 });
-  const beadM = new THREE.MeshBasicMaterial({ color: 0xff5a2a });
   const semiGun = new THREE.Group(), ouGun = new THREE.Group(); gun.add(semiGun, ouGun);
-  { // Semi-auto in black synthetic: raised vent rib, textured forend, pistol grip, skeleton adjustable stock.
-    const poly = new THREE.MeshStandardMaterial({ color: 0x1d1e20, roughness: 0.82, metalness: 0.05, envMapIntensity: 0.35 });
-    const grip = new THREE.MeshStandardMaterial({ color: 0x131416, roughness: 0.95, metalness: 0, envMapIntensity: 0.2 });
-    const blue = new THREE.MeshStandardMaterial({ color: 0x0f1012, metalness: 0.85, roughness: 0.32, envMapIntensity: 0.6 });
-    const steel = new THREE.MeshStandardMaterial({ color: 0x9a9da2, metalness: 0.9, roughness: 0.3 });
-    const S = semiGun, tilt = (o, r) => { o.rotation.x = r; return o; };
-    part(S, cylZ, blue, 0.0105, 0.0105, 0.68, 0, 0.018, -0.58);                // barrel
-    part(S, cylZ, blue, 0.0118, 0.0118, 0.035, 0, 0.018, -0.905);              // extended choke tube
-    part(S, box, blue, 0.0075, 0.0025, 0.7, 0, 0.0352, -0.565);                // stepped rib…
-    for (let z = -0.25; z > -0.9; z -= 0.065) part(S, box, blue, 0.004, 0.006, 0.012, 0, 0.0315, z); // …on posts, open between
-    part(S, cylZ, blue, 0.0105, 0.0105, 0.4, 0, -0.0085, -0.42);              // magazine tube
-    part(S, cylZ, poly, 0.0135, 0.0135, 0.03, 0, -0.0085, -0.625);             // magazine cap
-    part(S, cylZ, poly, 0.029, 0.031, 0.34, 0, 0.002, -0.33);                 // forend
-    for (const x of [-1, 1]) part(S, box, grip, 0.003, 0.034, 0.24, x * 0.0295, -0.004, -0.33); // grip panels
-    part(S, cylZ, poly, 0.0255, 0.0255, 0.02, 0, 0.002, -0.505);               // forend nose
-    part(S, box, poly, 0.047, 0.05, 0.21, 0, 0.003, -0.06);                    // receiver
-    part(S, cylZ, poly, 0.0235, 0.012, 0.21, 0, 0.026, -0.06);                 // rounded receiver top
-    part(S, box, blue, 0.003, 0.02, 0.07, 0.0237, 0.012, -0.08);               // ejection port
-    part(S, box, steel, 0.003, 0.012, 0.05, 0.0245, 0.012, -0.08);             // bolt face in the port
-    part(S, cylZ, steel, 0.004, 0.004, 0.02, 0.031, 0.012, -0.098).rotation.y = Math.PI / 2; // cocking handle
-    part(S, box, blue, 0.002, 0.008, 0.018, -0.0245, -0.006, -0.03);           // bolt release
-    part(S, box, poly, 0.005, 0.004, 0.06, 0, -0.04, 0.005);                   // trigger guard: bottom bar
-    tilt(part(S, box, poly, 0.005, 0.004, 0.035, 0, -0.03, -0.035), 0.75);     //   front leg
-    tilt(part(S, box, steel, 0.004, 0.026, 0.004, 0, -0.03, 0.005), 0.25);     // trigger blade
-    tilt(part(S, box, grip, 0.036, 0.1, 0.044, 0, -0.065, 0.085), -0.42);      // pistol grip
-    part(S, box, poly, 0.04, 0.035, 0.2, 0, 0.0, 0.14);                        // stock wrist and comb
-    part(S, box, poly, 0.034, 0.08, 0.09, 0, -0.05, 0.15);                     // solid web behind the grip
-    tilt(part(S, box, poly, 0.036, 0.016, 0.16, 0, 0.022, 0.215), 0.02);       // adjustable cheek riser
-    part(S, box, poly, 0.038, 0.03, 0.12, 0, -0.002, 0.29);                    // skeleton: upper beam
-    tilt(part(S, box, poly, 0.034, 0.018, 0.24, 0, -0.103, 0.237), 0.04);      //   lower beam
-    tilt(part(S, box, poly, 0.03, 0.012, 0.16, 0, -0.055, 0.265), -0.6);       //   cross strut
-    part(S, box, grip, 0.045, 0.14, 0.03, 0, -0.05, 0.365);                    // recoil pad
-    part(S, sph, beadM, 0.0032, 0.0032, 0.0032, 0, 0.0405, -0.91);             // fibre-optic bead
-    addHands(S, [0, -0.0194, 0.0646, -0.42], [0, 0.002, -0.36]);
-  }
-  { // Over-under in grey laminate: stacked barrels with vented top and side ribs, black action, adjustable comb.
-    const lam = new THREE.MeshStandardMaterial({ map: laminateTexture(), roughness: 0.45, metalness: 0, envMapIntensity: 0.5 });
-    const blue = new THREE.MeshStandardMaterial({ color: 0x0d0e10, metalness: 0.85, roughness: 0.25, envMapIntensity: 0.7 });
-    const steel = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 0.95, roughness: 0.22 });
-    const red = new THREE.MeshStandardMaterial({ color: 0xd8261c, emissive: 0x5a0a06, roughness: 0.4 });
-    const green = new THREE.MeshStandardMaterial({ color: 0x2f8f3a, metalness: 0.6, roughness: 0.35 });
-    const pad = new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.95 });
-    const O = ouGun, tilt = (o, r) => { o.rotation.x = r; return o; };
-    for (const y of OU_BARRELS) {
-      part(O, cylZ, blue, 0.0115, 0.0115, 0.68, 0, y, -0.58);                 // barrel
-      part(O, cylZ, steel, 0.0124, 0.0124, 0.02, 0, y, -0.925);               // extended choke
-      part(O, cylZ, green, 0.0126, 0.0126, 0.005, 0, y, -0.912);              //   choke band
-    }
-    for (let z = -0.27; z > -0.9; z -= 0.065) part(O, box, blue, 0.021, 0.006, 0.048, 0, 0.0063, z); // vented side ribs
-    part(O, box, blue, 0.008, 0.0025, 0.7, 0, 0.0335, -0.565);                // top rib…
-    for (let z = -0.25; z > -0.9; z -= 0.065) part(O, box, blue, 0.004, 0.005, 0.012, 0, 0.031, z); // …on posts
-    part(O, box, blue, 0.043, 0.058, 0.125, 0, 0.004, -0.1);                  // action
-    for (const x of [-1, 1]) {
-      part(O, box, red, 0.0015, 0.005, 0.016, x * 0.0219, 0.017, -0.125);   // red badge
-      tilt(part(O, box, steel, 0.0012, 0.0015, 0.06, x * 0.0219, -0.004, -0.09), -0.55); // engraved line
-    }
-    part(O, box, steel, 0.012, 0.006, 0.028, 0.004, 0.034, -0.04);           // top lever
-    part(O, box, lam, 0.05, 0.044, 0.27, 0, -0.012, -0.3);                    // forend
-    part(O, cylZ, lam, 0.025, 0.022, 0.27, 0, -0.016, -0.3);                  // rounded forend belly
-    part(O, torus, blue, 0.02, 0.02, 0.02, 0, -0.032, -0.03);                 // round trigger guard
-    tilt(part(O, box, steel, 0.004, 0.024, 0.004, 0, -0.03, -0.03), 0.25);    // single trigger
-    tilt(part(O, box, lam, 0.036, 0.1, 0.044, 0, -0.065, 0.085), -0.42);      // pistol grip
-    part(O, box, lam, 0.038, 0.035, 0.2, 0, 0.0, 0.14);                        // wrist and comb line
-    tilt(part(O, box, lam, 0.036, 0.11, 0.24, 0, -0.06, 0.245), 0.06);       // stock body
-    part(O, box, lam, 0.034, 0.014, 0.17, 0, 0.024, 0.225);                    // adjustable comb
-    part(O, box, pad, 0.042, 0.15, 0.025, 0, -0.05, 0.372);                    // recoil pad
-    part(O, sph, beadM, 0.0032, 0.0032, 0.0032, 0, 0.038, -0.91);              // bead
-    addHands(O, [0, -0.0194, 0.0646, -0.42], [0, -0.008, -0.31], 0.88);
-  }
+  semiGun.add(makeSemiAuto()); addHands(semiGun, [0, -0.0194, 0.0646, -0.42], [0, 0.002, -0.36]);
+  ouGun.add(makeOverUnder()); addHands(ouGun, [0, -0.0194, 0.0646, -0.42], [0, -0.008, -0.31], 0.88);
   const flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTexture(), blending: THREE.AdditiveBlending, depthWrite: false }));
   flash.scale.setScalar(0.4); flash.position.set(0, 0.018, -0.98); gun.add(flash);
   const flashL = new THREE.PointLight(0xffc070, 0, 30); flashL.position.copy(flash.position); gun.add(flashL);
@@ -517,7 +537,7 @@ export function createGame(canvas, cb) {
   let audio, raf, last = performance.now(), T = 0, state = 'menu', paused = false, locked = false;
   let yaw = 0, pitch = 0.16, kick = 0, recoil = 0, flashT = 0, spawnT = 1, aim = false, ads = 0, brk = 0, W = WEAPONS.semi;
   // mp: { seed, startAt (local ms), slot, count } while hunting in a room. R drives flights: seeded in a room.
-  let mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, duckSeq = 0, poseT = 0;
+  let Q = QUARRY.duck, mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, duckSeq = 0, poseT = 0;
   const rr = (a, b) => a + R() * (b - a);
   const UP = new THREE.Vector3(0, 1, 0);
   let timeLeft = GAME_TIME, score = 0, bag = 0, shots = 0, shells = W.mag, reloading = false, reloadT = 0, nextShot = 0, lastKill = -9, lastSec = 0;
@@ -525,10 +545,12 @@ export function createGame(canvas, cb) {
   // Who bagged which bird ('me' or another hunter's id), and whether it was a drake, for laying out the bag.
   const killLog = new Map(), drakeOf = new Map();
   const rel = new THREE.Vector3(), rv = new THREE.Vector3(), tmp = new THREE.Vector3();
-  const hud = () => cb.onHud({ score, ducks: bag, shells, mag: W.mag, reloading, aiming: aim, time: Math.ceil(timeLeft) });
+  const hud = () => cb.onHud({ score, ducks: bag, shells, mag: W.mag, reloading, aiming: aim, time: Math.ceil(timeLeft), canGrab: !!grabTarget && !held, holding: !!held });
 
   // lag: seconds this flight is late (tab was hidden), so it appears where it would be by now.
   function spawn(lag = 0) {
+    if (Q === QUARRY.finch) return spawnFinches(lag);
+    if (Q === QUARRY.thrush) return spawnThrush(lag);
     const speed = rr(13, 27), n = R() < 0.4 ? 1 : 2 + (R() * 4 | 0);
     const p = new THREE.Vector3(), v = new THREE.Vector3();
     if (R() < 0.72) { // crossing shot
@@ -542,13 +564,45 @@ export function createGame(canvas, cb) {
     p.applyAxisAngle(UP, turn); v.applyAxisAngle(UP, turn);
     v.normalize(); const lat = new THREE.Vector3(-v.z, 0, v.x);
     for (let i = 0; i < n; i++) { // V formation
-      const d = makeDuck(R() < 0.6), k = Math.ceil(i / 2);
+      const d = makeBird('duck', R() < 0.6), k = Math.ceil(i / 2);
       d.g.position.copy(p).addScaledVector(v, -k * 1.6).addScaledVector(lat, (i % 2 ? 1 : -1) * k * 1.2); d.g.position.y += rr(-0.4, 0.4);
       Object.assign(d, { id: duckSeq++, vel: v.clone().multiplyScalar(speed), alive: true, down: false, ph: rr(0, 6), hz: 5 + speed * 0.14, life: 0, wob: rr(0, 6), spin: 0 });
       d.g.position.addScaledVector(d.vel, lag); drakeOf.set(d.id, d.drake);
       scene.add(d.g); ducks.push(d);
     }
     if (state === 'play') audio?.quack(ducks[ducks.length - 1].g.position, rnd(0.7, 1));
+  }
+  // Chaffinches: a loose flock crossing low and close, every bird bounding on its own rhythm.
+  // Chaffinches: one big flock of 4–20 at a time, always out of the front of the line (-z), high up, coming in
+  // on the left, the right or down the middle and passing over or beside the hunters. The flock weaves as one;
+  // each bird bounds on its own rhythm inside it.
+  function spawnFinches(lag) {
+    const speed = rr(11, 15), n = 4 + (R() * 17 | 0), lane = rr(-35, 35), alt = rr(15, 30), weave = rr(0, 6);
+    const p = new THREE.Vector3(lane, alt, -115);
+    const v = new THREE.Vector3(lane * rr(0.1, 0.6) + rr(-6, 6) - lane, 0, 115).normalize(); // passes near the line
+    const lat = new THREE.Vector3(-v.z, 0, v.x);
+    for (let i = 0; i < n; i++) {
+      const d = makeBird('finch', R() < 0.55);
+      d.g.position.copy(p).addScaledVector(v, -rr(0, 12)).addScaledVector(lat, rr(-6, 6)); d.g.position.y += rr(-2.5, 2.5);
+      Object.assign(d, { id: duckSeq++, kind: 'finch', vel: v.clone().multiplyScalar(speed * rr(0.95, 1.05)), alive: true, down: false,
+        ph: 0, life: 0, wob: rr(0, 1), bhz: rr(1.9, 2.5), weave, alt: d.g.position.y, spin: 0 });
+      d.g.position.addScaledVector(d.vel, lag); drakeOf.set(d.id, d.drake);
+      scene.add(d.g); ducks.push(d);
+    }
+    if (state === 'play') audio?.chirp(ducks[ducks.length - 1].g.position, 1);
+  }
+
+  // Thrush: one bird at a time breaks out of the grove canopy, climbs and comes at the line fast, passing
+  // left, right or overhead.
+  function spawnThrush(lag) {
+    const d = makeBird('thrush', true), p = new THREE.Vector3(rr(-38, 38), rr(3.2, 5.8), rr(-41, -35));
+    const v = new THREE.Vector3(rr(-14, 14) - p.x * 0.3, 0, 40).normalize();
+    d.g.position.copy(p);
+    Object.assign(d, { id: duckSeq++, vel: v.multiplyScalar(rr(16, 21)), alive: true, down: false, ph: 0, life: 0,
+      wob: rr(0, 1), alt: rr(6, 13), spin: 0 });
+    d.g.position.addScaledVector(d.vel, lag); drakeOf.set(d.id, true);
+    scene.add(d.g); ducks.push(d);
+    if (state === 'play') audio?.tsip(p);
   }
 
   function burst(p) {
@@ -565,13 +619,14 @@ export function createGame(canvas, cb) {
   }
   function kill(d, range) {
     const speed = d.vel.length(), dbl = T - lastKill < 1.5; lastKill = T;
-    const pts = Math.round((40 + range * 2 + speed * 3) * (dbl ? 2 : 1)); score += pts; bag++;
+    const pts = Math.round((40 + range * 2 + speed * 3) * Q.pts * (dbl ? 2 : 1)); score += pts; bag++;
     drop(d); cb.onMsg(`${dbl ? 'DOUBLE!  ' : ''}+${pts}  ·  ${range | 0} m`); hud();
     killLog.set(d.id, 'me');
     cb.onKill?.(d.id, pts); // in a room: claim the bird (first claim wins)
   }
 
   function fire() {
+    if (held) return; // hands full
     if (T < nextShot || elapsed < 0 || (reloading && !W.single)) return; // countdown, or a broken-open double
     if (shells <= 0) { audio.empty(); wantReload(); return; }
     reloading = false; reloadT = 0; shells--; shots++; nextShot = T + W.interval; recoil = 1; flashT = 0.05;
@@ -579,7 +634,9 @@ export function createGame(canvas, cb) {
     audio.shot(W.single);
     pellets.push({ pos: camera.position.clone(), dir: camera.getWorldDirection(new THREE.Vector3()), dist: 0, hit: false, miss: 1e9, hint: '' });
     kick = 1;
-    for (const d of ducks) if (d.alive) d.vel.y += rnd(0.3, 1.6); // birds flare at the shot
+    // Birds flare at the shot. Solo only: in a room every screen must fly identical birds, and a random
+    // flare from one hunter's gun would send their copies somewhere else on everyone else's screen.
+    if (!mp) for (const d of ducks) if (d.alive) d.vel.y += rnd(0.3, 1.6);
     if (W.single) { hull.position.set(0.14, -0.11, -0.4); hullV.set(1.5, 1.2, 0.2); hullT = 0.5; }
     hud(); if (mp) cb.onPose?.({ yaw, pitch, shots });
   }
@@ -596,18 +653,23 @@ export function createGame(canvas, cb) {
   // where they stood, heads away, wings folded, in the order they were shot.
   function layBag(list) {
     clearBag();
+    if (held) toggleHold();
+    for (let i = ducks.length - 1; i >= 0; i--) if (!ducks[i].alive) { scene.remove(ducks[i].g); ducks.splice(i, 1); } // the bag shows them all
+    dogMode = 'sit'; dogBird = null; fetchQ.length = 0;
     const birdsOf = {};
     for (const [id, by] of killLog) (birdsOf[by] ||= []).push(drakeOf.get(id) ?? true);
-    const COLS = 6, DX = 0.46, DZ = 0.9, FRONT = -2.4;
+    const { cols: COLS, dx: DX, dz: DZ, front: FRONT } = Q.bag;
     let x0 = Infinity, x1 = -Infinity, depth = DZ;
     for (const e of list) {
       const birds = birdsOf[e.by] || [], cx = slotX(e.slot, e.count), rows = Math.max(1, Math.ceil(birds.length / COLS));
       birds.forEach((drake, i) => {
         const r = i / COLS | 0, inRow = Math.min(COLS, birds.length - r * COLS);
-        const d = makeDuck(drake);
-        for (const [a, b] of d.wings) { a.rotation.set(0, 1.35, 0); b.rotation.set(0, 0.2, 0); }
+        const d = makeBird(Q.kind, drake);
+        foldWings(d);
         d.g.position.set(cx + (i % COLS - (inRow - 1) / 2) * DX + rnd(-0.03, 0.03), 0.12, FRONT - r * DZ + rnd(-0.05, 0.05));
-        d.g.rotation.set(0, Math.PI + rnd(-0.08, 0.08), rnd(-0.35, 0.35));
+        d.g.position.y = Q.rest;
+        // Ducks lie on their bellies; small birds are laid on their backs, breast up, as in a gamebag.
+        d.g.rotation.set(0, Math.PI + rnd(-0.08, 0.08), (Q.upturn ? Math.PI : 0) + rnd(-0.35, 0.35));
         bagGroup.add(d.g);
       });
       const lines = e.name ? [e.name, e.sub || ''] : birds.length ? [] : ['No birds this time'];
@@ -619,7 +681,92 @@ export function createGame(canvas, cb) {
     }
     mow([x0 - 1.5, x1 + 1.5, FRONT - depth - 2, 0.6]); mown = true;
     const span = x1 - x0;
+    dog.g.position.set(x1 + 0.9, 0, FRONT - 0.3); dog.g.rotation.set(0, -Math.PI * 0.6, 0); // sits beside the bag
     bagView = { cx: (x0 + x1) / 2, zc: FRONT - depth / 2 + 0.6, h: 1.7 + depth * 0.45 + span * 0.3, z: -0.6 + span * 0.35, span };
+  }
+
+  /* ---------- the retriever and the pile beside the hunter ---------- */
+  // Our birds that land within reach are fetched one at a time and laid next to the hunter. Birds the dog
+  // does not get to simply stay where they fell.
+  const dog = makeDog(); dog.g.visible = false; scene.add(dog.g);
+  const fetchQ = [], FETCH_RANGE = 70, dv = new THREE.Vector3();
+  let dogMode = 'sit', dogBird = null, pileN = 0;
+  const hunterX = () => camera.position.x;
+  const mine = d => ducks.includes(d) && killLog.get(d.id) === 'me';
+  const dogHome = () => new THREE.Vector3(hunterX() + 1.1, 0, 0.5);
+  const pileSpot = k => new THREE.Vector3(hunterX() + 1.1 + (k % 4) * Q.bag.dx, 0, -1.7 - (k / 4 | 0) * Q.bag.dz * 0.8); // rows to the front-right
+  function resetDog() {
+    fetchQ.length = 0; dogBird = null; dogMode = 'sit'; pileN = 0;
+    dog.g.position.copy(dogHome()); dog.g.rotation.set(0, Math.PI * 0.85, 0);
+  }
+  function moveDog(to, dt, speed) { // true on arrival
+    dv.set(to.x - dog.g.position.x, 0, to.z - dog.g.position.z);
+    const dist = dv.length(); if (dist < 0.35) return true;
+    dog.g.position.addScaledVector(dv.normalize(), Math.min(dist, speed * dt));
+    dog.g.rotation.y = Math.atan2(dv.x, dv.z);
+    return false;
+  }
+  function stepDog(dt) {
+    let running = false;
+    if (dogMode === 'sit' && fetchQ.length) {
+      dogBird = fetchQ.shift();
+      dogMode = mine(dogBird) && dogBird.down && !dogBird.retrieved ? 'out' : 'sit';
+    }
+    if (dogMode === 'out') {
+      running = true;
+      if (!mine(dogBird)) { dogMode = 'home'; dogBird = null; }
+      else if (moveDog(dogBird.g.position, dt, 8.5)) { dogMode = 'back'; dogBird.carried = true; }
+    } else if (dogMode === 'back') {
+      running = true;
+      const spot = pileSpot(pileN);
+      if (moveDog(spot, dt, 7)) {
+        const b = dogBird; b.carried = false; b.retrieved = mine(b); foldWings(b); // a bird lost to another hunter's claim isn't ours to pick up
+        b.g.position.copy(spot).setY(groundH(spot.x, spot.z) + (QUARRY[b.kind] || QUARRY.duck).rest);
+        b.g.rotation.set(0, Math.PI + rnd(-0.1, 0.1), (Q.upturn ? Math.PI : 0) + rnd(-0.3, 0.3)); // laid out like the bag
+        pileN++; dogMode = 'home'; dogBird = null;
+      }
+    } else if (dogMode === 'home') {
+      running = true;
+      if (moveDog(dogHome(), dt, 6)) { dogMode = 'sit'; dog.g.rotation.y = Math.PI * 0.85; }
+    }
+    if (dogBird?.carried) { // held across the jaws
+      dog.g.updateMatrixWorld();
+      dogBird.g.position.copy(dog.head.localToWorld(dog.mouth.clone()));
+      dogBird.g.rotation.set(0, dog.g.rotation.y + Math.PI / 2, Math.PI / 2);
+    }
+    // Gallop while running; sit (haunches down, tail sweeping) at rest.
+    const k = running ? Math.sin(T * 14) : 0;
+    dog.legs.forEach((l, i) => { l.rotation.x = running ? k * (i < 2 ? 0.7 : -0.7) : (i < 2 ? 0 : -1.25); });
+    dog.body.rotation.x = Math.PI / 2 + (running ? 0 : -0.45); dog.body.position.y = running ? 0.5 + Math.abs(k) * 0.04 : 0.4;
+    dog.tail.rotation.y = Math.sin(T * (running ? 8 : 3)) * 0.5;
+  }
+
+  /* ---------- looking at and holding a retrieved bird ---------- */
+  const holdGroup = new THREE.Group(); camera.add(holdGroup); holdGroup.visible = false;
+  { const h = supportHand(); h.rotation.x = -0.2; holdGroup.add(h); }
+  let held = null, heldFrom = null, grabTarget = null;
+  function findGrab() {
+    let best = null, bestA = 0.14;
+    camera.getWorldDirection(dv);
+    for (const d of ducks) {
+      if (!d.retrieved) continue;
+      tmp.copy(d.g.position).sub(camera.position);
+      if (tmp.length() > 6) continue;
+      const a = dv.angleTo(tmp.normalize()); if (a < bestA) { bestA = a; best = d; }
+    }
+    if (best !== grabTarget) { grabTarget = best; hud(); }
+  }
+  function toggleHold() {
+    if (held) { // back on the pile where it came from
+      scene.add(held.g); held.g.position.copy(heldFrom.p); held.g.quaternion.copy(heldFrom.q);
+      held = null; holdGroup.visible = false; hud(); return;
+    }
+    if (!grabTarget) return;
+    held = grabTarget; grabTarget = null; aim = false;
+    heldFrom = { p: held.g.position.clone(), q: held.g.quaternion.clone() };
+    const size = new THREE.Box3().setFromObject(held.g).getSize(new THREE.Vector3()).length();
+    holdGroup.add(held.g); held.g.position.set(0, 0.03, 0); held.g.rotation.set(0.25, Math.PI * 0.6, Math.PI);
+    holdGroup.position.set(0.02, -0.1 - size * 0.1, -0.35 - size * 0.8); holdGroup.visible = true; hud();
   }
 
   function step(dt) {
@@ -641,7 +788,7 @@ export function createGame(canvas, cb) {
         // Flight schedule runs off the round clock (seeded in a room), so it is identical for every player.
         while (elapsed >= nextSpawn) {
           const lag = elapsed - nextSpawn; spawn(lag);
-          nextSpawn += (rr(1.6, 3.6) - 1.2 * Math.min(1, nextSpawn / GAME_TIME)) / (mp ? 1 + 0.25 * (mp.count - 1) : 1);
+          nextSpawn += (rr(...Q.gap) - 1.2 * Math.min(1, nextSpawn / GAME_TIME)) / (mp ? 1 + 0.25 * (mp.count - 1) : 1);
         }
         if (mp && (poseT -= dt) <= 0) { poseT = 0.5; cb.onPose?.({ yaw, pitch, shots }); }
       }
@@ -669,7 +816,7 @@ export function createGame(canvas, cb) {
         rel.copy(s.pos).sub(d.g.position); rv.copy(s.dir).multiplyScalar(SHOT_SPEED).sub(d.vel);
         const tt = clamp(-rel.dot(rv) / rv.lengthSq(), 0, dt); rel.addScaledVector(rv, tt);
         const miss = rel.length(), range = s.dist + SHOT_SPEED * tt;
-        if (miss < 0.26 + range * 0.013 && Math.random() < (64 - range) / 24) { kill(d, range); s.hit = true; }
+        if (miss < Q.hitR + range * 0.013 && Math.random() < (Q.reach - range) / Q.fade) { kill(d, range); s.hit = true; }
         else if (miss < s.miss) {
           const along = rel.dot(d.vel) / d.vel.length(); s.miss = miss;
           s.hint = Math.abs(along) > Math.abs(rel.y) ? (along > 0 ? 'Too far ahead' : 'Behind — lead more') : (rel.y > 0 ? 'Over the top' : 'Underneath');
@@ -682,7 +829,28 @@ export function createGame(canvas, cb) {
     for (let i = ducks.length - 1; i >= 0; i--) {
       const d = ducks[i], g = d.g, p = g.position; d.life += dt;
       let gone = false;
-      if (d.alive) {
+      if (d.alive && d.kind === 'finch') {
+        // Bounding flight: a burst of quick wingbeats lifts the bird, then it tucks its wings and drops in an arc.
+        // The heading weaves from side to side so the flock never flies a straight line.
+        const flap = (d.life * d.bhz + d.wob) % 1 < 0.42;
+        d.vel.y += ((flap ? 15 : -11) + (d.alt - p.y) * 1.2 - d.vel.y * 0.8) * dt;
+        d.vel.applyAxisAngle(UP, Math.sin(d.life * 1.3 + d.weave) * 0.35 * dt);
+        p.addScaledVector(d.vel, dt); g.lookAt(tmp.copy(p).add(d.vel));
+        d.ph += dt * 17 * TAU;
+        if (flap) for (const [a, b] of d.wings) { a.position.y = 0; a.scale.z = 1; a.rotation.set(0, 0, 0.1 + 0.9 * Math.sin(d.ph)); b.rotation.set(0, 0, 0.5 * Math.sin(d.ph - 1.1)); }
+        else foldWings(d);
+        if (state === 'play' && Math.random() < dt * 0.12) audio?.chirp(p, rnd(0.5, 1));
+        gone = Math.hypot(p.x, p.z) > 200;
+      } else if (d.alive && d.kind === 'thrush') {
+        // Fast, direct flight: long runs of quick wingbeats broken by brief closed-wing dips; climbs out of the trees.
+        const flap = (d.life * 1.7 + d.wob) % 1 < 0.78;
+        d.vel.y += ((flap ? 3 : -7) + (d.alt - p.y) * 1.1 - d.vel.y * 0.9) * dt;
+        p.addScaledVector(d.vel, dt); g.lookAt(tmp.copy(p).add(d.vel));
+        d.ph += dt * 13 * TAU;
+        if (flap) for (const [a, b] of d.wings) { a.position.y = 0; a.scale.z = 1; a.rotation.set(0, 0, 0.15 + 0.85 * Math.sin(d.ph)); b.rotation.set(0, 0, 0.45 * Math.sin(d.ph - 1.1)); }
+        else foldWings(d);
+        gone = Math.hypot(p.x, p.z) > 200;
+      } else if (d.alive) {
         d.vel.y += (Math.sin(d.life * 1.1 + d.wob) * 0.9 + (p.y < 4 ? 2 : p.y > 30 ? -2 : 0)) * dt;
         p.addScaledVector(d.vel, dt); g.lookAt(tmp.copy(p).add(d.vel)); g.rotateZ(Math.sin(d.life * 0.9 + d.wob) * 0.12);
         d.ph += dt * d.hz * TAU;
@@ -692,9 +860,12 @@ export function createGame(canvas, cb) {
       } else if (!d.down) {
         d.vel.y -= 9.8 * dt; d.vel.multiplyScalar(1 - 0.5 * dt); p.addScaledVector(d.vel, dt);
         g.rotateX(d.spin * dt); g.rotateZ(d.spin * 0.6 * dt);
-        const h = groundH(p.x, p.z) + 0.12;
-        if (p.y < h) { d.down = true; d.life = 0; p.y = h; g.rotation.set(0, rnd(0, 6), 1.4); audio?.thud(p); }
-      } else gone = d.life > 8;
+        const h = groundH(p.x, p.z) + (QUARRY[d.kind] || QUARRY.duck).rest;
+        if (p.y < h) {
+          d.down = true; d.life = 0; p.y = h; g.rotation.set(0, rnd(0, 6), 1.4); audio?.thud(p);
+          if (state === 'play' && killLog.get(d.id) === 'me' && Math.hypot(p.x - hunterX(), p.z) < FETCH_RANGE) { d.fetch = true; fetchQ.push(d); }
+        }
+      } else gone = d.life > 8 && !d.fetch && !d.retrieved; // the dog's birds stay
       if (gone) { scene.remove(g); ducks.splice(i, 1); }
     }
 
@@ -706,7 +877,8 @@ export function createGame(canvas, cb) {
     }
 
     if (!bagView) camera.rotation.set(pitch + kick * 0.03, yaw, 0);
-    gun.visible = state === 'play';
+    if (state === 'play') { stepDog(dt); if (!held) findGrab(); }
+    gun.visible = state === 'play' && !held;
     // Right mouse shoulders the gun: the eye drops just above the rib and looks down it to the bead.
     // While a double is broken open for reloading it drops off the shoulder.
     brk += ((!W.single && reloading && state === 'play' ? 1 : 0) - brk) * Math.min(1, dt * 10);
@@ -734,7 +906,7 @@ export function createGame(canvas, cb) {
   const look = (dx, dy, s) => { // full 360° turn; slower while aiming
     if (!live()) return;
     const k = s * camera.fov / 55;
-    yaw -= dx * k; pitch = clamp(pitch - dy * k, -0.2, 1.45);
+    yaw -= dx * k; pitch = clamp(pitch - dy * k, PITCH_MIN, PITCH_MAX);
   };
   // Mouse-look only while the pointer is captured; a free cursor sliding over the page must not steer the gun.
   // Chrome (notably on Windows) occasionally reports one bogus jump of hundreds of px under pointer lock, which
@@ -770,6 +942,7 @@ export function createGame(canvas, cb) {
   const onKey = e => {
     if (!live()) return;
     if (e.code === 'KeyR') wantReload();
+    else if (e.code === 'KeyE') toggleHold();
     else if (e.code === 'Escape' || e.code === 'KeyP') pause(); // Esc also pauses when the mouse isn't captured
   };
   const onMenu = e => e.preventDefault();
@@ -795,8 +968,10 @@ export function createGame(canvas, cb) {
   onResize(); raf = requestAnimationFrame(frame);
 
   return {
-    // room (optional): { seed, startAt: local ms when the round begins, slot, count }.
-    start(weapon, room) {
+    // room (optional): { seed, startAt: local ms when the round begins, slot, count, quarry }. A room's quarry wins.
+    start(weapon, room, quarry) {
+      Q = QUARRY[room?.quarry || quarry] || QUARRY.duck;
+      trees.forEach(t => { t.visible = !Q.open; }); grove.visible = Q.grove;
       audio ||= makeAudio(); audio.resume();
       W = WEAPONS[weapon] || WEAPONS.semi; semiGun.visible = W.single; ouGun.visible = !W.single;
       flash.position.y = flashL.position.y = 0.018; brk = 0;
@@ -804,13 +979,17 @@ export function createGame(canvas, cb) {
       mp = room || null; R = mp ? mulberry(mp.seed) : Math.random; duckSeq = 0;
       elapsed = mp ? (Date.now() - mp.startAt) / 1000 : 0; nextSpawn = 1.5; timeLeft = GAME_TIME - elapsed; lastSec = 0;
       camera.position.set(mp ? slotX(mp.slot, mp.count) : 0, EYE, 0);
+      if (held) toggleHold(); resetDog(); dog.g.visible = true;
+      const hx = camera.position.x; mow([hx - 0.6, hx + 3.4, -5.5, 1.2]); mown = true; // short grass where the dog lays the birds
       score = bag = shots = 0; shells = W.mag; reloading = false; reloadT = 0; nextShot = 0; lastKill = -9;
       yaw = 0; pitch = 0.2; aim = false; paused = false; state = 'play'; hud(); lock();
     },
     // Abandon the hunt (no score posted) and go back to the drifting menu view.
     quit() {
+      if (held) toggleHold(); dog.g.visible = false;
       state = 'menu'; paused = false; aim = false; reloading = false; locked = false; document.exitPointerLock?.();
       mp = null; R = Math.random; camera.position.set(0, EYE, 0); clearPeers(); clearBag();
+      trees.forEach(t => { t.visible = true; }); grove.visible = false;
       ducks.forEach(d => scene.remove(d.g)); ducks.length = pellets.length = 0;
     },
     // After the round: lay out each hunter's birds on the grass and look down on them. See layBag().
@@ -828,7 +1007,7 @@ export function createGame(canvas, cb) {
         seen.add(p.id);
         let h = peers.get(p.id);
         if (!h) { h = makeHunter(p.name); h.shots = p.shots || 0; h.g.position.set(slotX(p.slot, mp.count), 0, 0); scene.add(h.g); peers.set(p.id, h); }
-        h.yaw = p.yaw || 0; h.pitch = clamp(p.pitch || 0, -0.2, 1.45);
+        h.yaw = p.yaw || 0; h.pitch = clamp(p.pitch || 0, PITCH_MIN, PITCH_MAX);
         if ((p.shots || 0) > h.shots) { h.flT = 0.06; audio?.distantShot(tmp.copy(h.g.position).setY(EYE)); }
         h.shots = p.shots || 0;
       }
@@ -839,6 +1018,7 @@ export function createGame(canvas, cb) {
     fire: () => { if (live()) fire(); },
     reload: () => { if (live()) wantReload(); },
     toggleAim: () => { if (live()) setAim(!aim); },
+    hold: () => { if (live()) toggleHold(); },
     dispose() { cancelAnimationFrame(raf); events.forEach(([t, n, f]) => t.removeEventListener(n, f)); renderer.dispose(); },
   };
 }

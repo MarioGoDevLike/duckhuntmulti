@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createGame, WEAPONS, GAME_TIME, TOUCH } from './engine.js';
+import { createGame, birdPortraits, WEAPONS, QUARRY, GAME_TIME, TOUCH } from './engine.js';
 import semiPic from './assets/a800x_pic2.png';
 import ouPic from './assets/over_under.png';
 import {
@@ -7,7 +7,8 @@ import {
   createRoom, joinRoom, leaveRoom, startRound, watchRoom, watchPlayers, watchKills, claimKill, updatePlayer,
 } from './firebase.js';
 
-const KEY = 'marshDawnHighscore', GUN_KEY = 'marshDawnWeapon';
+// Storage keys keep the game's original name so existing high scores and choices carry over.
+const KEY = 'marshDawnHighscore', GUN_KEY = 'marshDawnWeapon', QUARRY_KEY = 'marshDawnQuarry';
 const fmt = s => `${s / 60 | 0}:${String(s % 60).padStart(2, '0')}`;
 const store = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 const read = k => { try { return localStorage.getItem(k); } catch { return null; } };
@@ -25,10 +26,21 @@ function toggleFullscreen() {
 }
 const portraitQuery = matchMedia('(orientation: portrait)');
 
+const Rating = ({ label, v }) => (
+  <div className="rating"><span>{label}</span><i>{[1, 2, 3, 4, 5].map(n => <b key={n} className={n <= v ? 'on' : ''} />)}</i></div>
+);
+// Shotgun handling on the same 1–5 scale: shells carried, how quickly the second shot comes, time to full again.
+const gunRatings = w => ({
+  capacity: w.mag,
+  followUp: Math.round(Math.min(5, Math.max(1, 5 - (w.interval - 0.1) * 15))),
+  reload: Math.round(Math.min(5, Math.max(1, 5 - (w.single ? w.mag * w.reload : w.reload) * 1.2))),
+});
+
 export default function App() {
   const canvas = useRef(), game = useRef();
   const [phase, setPhase] = useState('home'); // home | lobby | play | paused | over
   const [weapon, setWeapon] = useState(() => (WEAPONS[read(GUN_KEY)] ? read(GUN_KEY) : 'semi'));
+  const [quarry, setQuarry] = useState(() => (QUARRY[read(QUARRY_KEY)] ? read(QUARRY_KEY) : 'duck'));
   const [hud, setHud] = useState({ score: 0, ducks: 0, shells: 5, mag: 5, reloading: false, time: GAME_TIME });
   const [msg, setMsg] = useState({ id: 0, text: '' });
   const [result, setResult] = useState(null);
@@ -54,7 +66,8 @@ export default function App() {
       portraitQuery.removeEventListener('change', onTurn);
     };
   }, []);
-  const [tab, setTab] = useState('hunt'); // main menu tab: hunt | friends | board | controls
+  const [tab, setTab] = useState('hunt');
+  const [portraits] = useState(() => birdPortraits()); // rendered once from the 3D models // main menu tab: hunt | friends | board | controls
   const net = useRef({ round: 0 });
 
   useEffect(() => {
@@ -137,14 +150,14 @@ export default function App() {
   useEffect(() => {
     if (!room || !roomData || !user) return;
     const n = net.current;
-    if (roomData.members.length >= MAX_PLAYERS && roomData.round === 0) startRound(room.code, room.offset, GAME_TIME, true).catch(console.error);
+    if (roomData.members.length >= MAX_PLAYERS && roomData.round === 0) startRound(room.code, room.offset, GAME_TIME, quarry, true).catch(console.error);
     if (roomData.status !== 'play' || roomData.round <= n.round || !roomData.slots.includes(user.uid)) return;
     const startAt = roomData.startAt.toMillis() - room.offset; // server time → this machine's clock
     if (startAt + GAME_TIME * 1000 <= Date.now()) return;     // that round already finished
     Object.assign(n, { round: roomData.round, playing: true, pose: null, code: room.code, uid: user.uid });
     updatePlayer(room.code, user.uid, { score: 0, ducks: 0, shots: 0, round: n.round, weapon });
     setMsg({ id: 0, text: '' });
-    game.current.start(weapon, { seed: roomData.seed, startAt, slot: roomData.slots.indexOf(user.uid), count: roomData.slots.length });
+    game.current.start(weapon, { seed: roomData.seed, startAt, slot: roomData.slots.indexOf(user.uid), count: roomData.slots.length, quarry: roomData.quarry || 'duck' });
     setLiveRound(n.round); setPhase('play');
   }, [roomData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -174,7 +187,7 @@ export default function App() {
   };
   const create = () => enterRoom(createRoom(user, weapon));
   const join = () => joinCode.trim() && enterRoom(joinRoom(joinCode, user, weapon));
-  const startHunt = () => { game.current.unlockAudio(); startRound(room.code, room.offset, GAME_TIME).catch(err => setRoomErr(errText(err))); };
+  const startHunt = () => { game.current.unlockAudio(); startRound(room.code, room.offset, GAME_TIME, quarry).catch(err => setRoomErr(errText(err))); };
   const leave = () => {
     if (room && user) leaveRoom(room.code, user.uid).catch(console.error);
     game.current.quit();
@@ -183,7 +196,8 @@ export default function App() {
 
   /* ---------- solo ---------- */
   const pick = k => { setWeapon(k); store(GUN_KEY, k); if (room && user) updatePlayer(room.code, user.uid, { weapon: k }); };
-  const play = () => { setMsg({ id: 0, text: '' }); game.current.start(weapon); setPhase('play'); };
+  const choose = k => { setQuarry(k); store(QUARRY_KEY, k); };
+  const play = () => { setMsg({ id: 0, text: '' }); game.current.start(weapon, undefined, quarry); setPhase('play'); };
   const resume = () => { game.current.resume(); setPhase('play'); };
   const home = () => { game.current.quit(); setPhase('home'); };
   const W = WEAPONS[weapon];
@@ -203,20 +217,38 @@ export default function App() {
       <ol className="board">
         {board.map((r, i) => (
           <li key={r.id} className={r.id === user.uid ? 'me' : ''}>
-            <span>{i + 1}</span><span>{r.name}</span><span>{r.ducks} ducks</span><b>{r.score}</b>
+            <span>{i + 1}</span><span>{r.name}</span><span>{r.ducks} birds</span><b>{r.score}</b>
           </li>
         ))}
       </ol>
     ) : <div className="empty">No scores yet. Finish a hunt to post the first one.</div>) : !netErr && <div className="empty">Loading…</div>;
 
-  const guns = (
-    <div className="guns">
-      {Object.entries(WEAPONS).map(([k, w]) => (
-        <button key={k} className={k === weapon ? 'gun on' : 'gun'} onClick={() => pick(k)}>
-          <img className="gunpic" src={k === 'semi' ? semiPic : ouPic} alt="" />
-          <b>{w.name}</b><small>{w.type}</small><span>{w.desc}</span>
+  // What this hunt is after: our pick solo, the room's pick in a room round.
+  const Q = QUARRY[inRoom && (phase === 'play' || phase === 'paused' || phase === 'over') ? roomData?.quarry || 'duck' : quarry];
+  const quarries = (
+    <div className="cards three" role="radiogroup" aria-label="Quarry">
+      {Object.entries(QUARRY).map(([k, q]) => (
+        <button key={k} role="radio" aria-checked={k === quarry} className={k === quarry ? 'pick on' : 'pick'} onClick={() => choose(k)}>
+          <span className="pic bird">{portraits[k] && <img src={portraits[k]} alt="" />}<em>×{q.pts}</em></span>
+          <b>{q.name}</b><small>{q.line}</small>
+          <Rating label="Speed" v={q.speed} /><Rating label="Challenge" v={q.skill} />
         </button>
       ))}
+    </div>
+  );
+
+  const guns = (
+    <div className="cards" role="radiogroup" aria-label="Shotgun">
+      {Object.entries(WEAPONS).map(([k, w]) => {
+        const r = gunRatings(w);
+        return (
+          <button key={k} role="radio" aria-checked={k === weapon} className={k === weapon ? 'pick on' : 'pick'} onClick={() => pick(k)}>
+            <span className="pic gunshot"><img src={k === 'semi' ? semiPic : ouPic} alt="" /></span>
+            <b>{w.name}</b><small>{w.type}</small>
+            <Rating label="Capacity" v={r.capacity} /><Rating label="Follow-up" v={r.followUp} /><Rating label="Reload" v={r.reload} />
+          </button>
+        );
+      })}
     </div>
   );
 
@@ -243,7 +275,7 @@ export default function App() {
     const slots = roomData?.slots?.length ? roomData.slots : endRows.map(p => p.id);
     game.current.showBag(endRows.map(p => ({
       by: p.id === user?.uid ? 'me' : p.id, name: p.name, slot: Math.max(0, slots.indexOf(p.id)), count: slots.length,
-      winner: p.id === winnerId, sub: `${p.ducks} ${p.ducks === 1 ? 'duck' : 'ducks'} · ${p.score} pts${p.id === winnerId ? ' · WINNER' : ''}`,
+      winner: p.id === winnerId, sub: `${p.ducks} ${p.ducks === 1 ? Q.one : Q.many} · ${p.score} pts${p.id === winnerId ? ' · WINNER' : ''}`,
     })));
   }, [phase, result, bagKey, winnerId]); // eslint-disable-line react-hooks/exhaustive-deps
   // Phones hunt in landscape only: turning upright mid-hunt pauses it, and it can resume once turned back.
@@ -256,7 +288,7 @@ export default function App() {
       {phase === 'play' && (
         <div className="hud">
           <div className="top">
-            <span>Score {hud.score} · Ducks {hud.ducks}</span>
+            <span>Score {hud.score} · {Q.many[0].toUpperCase() + Q.many.slice(1)} {hud.ducks}</span>
             <b className={hud.time <= 20 ? 'low' : ''}>{fmt(Math.min(hud.time, GAME_TIME))}</b>
             <span>Best {Math.max(best, hud.score)}</span>
           </div>
@@ -266,6 +298,7 @@ export default function App() {
           {countdown > 0 && <div className="count">{countdown}<small>{TOUCH ? 'Get ready' : 'Click the field to take aim'}</small></div>}
           {!hud.aiming && <div className="reticle" />}
           <div key={msg.id} className="msg">{msg.text}</div>
+          {(hud.canGrab || hud.holding) && <div className="grab">{hud.holding ? (TOUCH ? 'Tap PUT DOWN to lay it back' : 'E — put it back') : (TOUCH ? 'Tap PICK UP to hold the bird' : 'E — pick up the bird')}</div>}
           <div className="ammo">
             {hud.reloading ? <em>RELOADING…</em> : hud.shells === 0 && <em>EMPTY — {TOUCH ? 'tap RELOAD' : 'press R'}</em>}
             {Array.from({ length: hud.mag }, (_, i) => <i key={i} className={i < hud.shells ? 'on' : ''} />)}
@@ -276,6 +309,7 @@ export default function App() {
               <button className="reload" onPointerDown={() => game.current.reload()}>RELOAD</button>
               <button className={hud.aiming ? 'aim active' : 'aim'} onPointerDown={() => game.current.toggleAim()}>AIM</button>
               <button className="fire" onPointerDown={() => game.current.fire()}>FIRE</button>
+              {(hud.canGrab || hud.holding) && <button className="grabbtn" onPointerDown={() => game.current.hold()}>{hud.holding ? 'PUT DOWN' : 'PICK UP'}</button>}
             </div>
           )}
         </div>
@@ -296,26 +330,29 @@ export default function App() {
         </div>
       )}
       {phase === 'home' && (
-        <div className="overlay">
-          <div className="card menu-card">
-            <h1>MARSH DAWN</h1>
-            <div className="sub">Duck season · {fmt(GAME_TIME)} hunt</div>
-            <div className="tabs" role="tablist">
+        <div className="menu-screen">
+          <aside className="menu-panel">
+            <header className="brand">
+              <div className="kicker">Wetland &amp; upland bird hunting</div>
+              <h1>Open Season</h1>
+              <div className="tagline">{Object.values(QUARRY).map(q => q.name).join('  ·  ')}</div>
+            </header>
+            <nav className="tabs" role="tablist">
               {[['hunt', 'Hunt'], ...(enabled ? [['friends', 'Multiplayer'], ['board', 'Leaderboard']] : []), ['controls', 'Controls']].map(([k, label]) => (
                 <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'tab on' : 'tab'} onClick={() => setTab(k)}>{label}</button>
               ))}
-            </div>
+            </nav>
             <div className="tabpanel" role="tabpanel">
               {tab === 'hunt' && <>
-                <div className="label">Choose your shotgun</div>
+                <div className="sect">Quarry</div>
+                {quarries}
+                <div className="sect">Shotgun</div>
                 {guns}
-                <div className="stats">High score <b>{best}</b></div>
-                <button onClick={play}>HUNT SOLO</button>
               </>}
               {tab === 'friends' && (user ? <div className="rooms">
-                <div className="label">Hunt with friends · 2–{MAX_PLAYERS} players</div>
-                <p className="hint">Create a room and share its code, or enter a friend's code. You'll hunt with <b>{W.name}</b>; change it on the Hunt tab.</p>
-                <button disabled={busy} onClick={create}>CREATE ROOM</button>
+                <div className="sect">Hunt with friends · 2–{MAX_PLAYERS} players</div>
+                <p className="hint">Create a room and share its code, or enter a friend's code. Your quarry and <b>{W.name}</b> come from the Hunt tab.</p>
+                <button className="cta" disabled={busy} onClick={create}>Create room</button>
                 <div className="or">or join one</div>
                 <div className="row">
                   <input value={joinCode} maxLength={5} placeholder="CODE" aria-label="Room code" onChange={e => setJoinCode(e.target.value.toUpperCase())}
@@ -325,18 +362,28 @@ export default function App() {
                 {roomErr && <div className="err">{roomErr}</div>}
               </div> : signInFirst('create or join a room'))}
               {tab === 'board' && <>
-                <div className="label">Top hunters</div>
+                <div className="sect">Top hunters</div>
                 {leaderboard}
               </>}
               {tab === 'controls' && <dl className="keys">
-                {(TOUCH ? [['Drag', 'Look around'], ['AIM', 'Look down the rib'], ['FIRE / RELOAD', 'On-screen buttons']]
-                  : [['Mouse', 'Look around'], ['Hold right click', 'Aim down the rib'], ['Left click', 'Fire'], ['R', 'Reload'], ['Esc', 'Pause']])
+                {(TOUCH ? [['Drag', 'Look around'], ['AIM', 'Look down the rib'], ['FIRE / RELOAD', 'On-screen buttons'], ['PICK UP', 'Hold a retrieved bird']]
+                  : [['Mouse', 'Look around'], ['Hold right click', 'Aim down the rib'], ['Left click', 'Fire'], ['R', 'Reload'], ['E', 'Pick up a retrieved bird'], ['Esc', 'Pause']])
                   .map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
-                <p className="hint">The shot takes time to reach the birds: swing through and fire in front of fast ones. Doubles score ×2.{TOUCH && ' Best played held sideways.'}</p>
+                <p className="hint">The shot takes time to reach the birds: swing through and fire in front of fast ones. Doubles score ×2.{TOUCH && ' Played in landscape.'}</p>
               </dl>}
             </div>
-            {accountLine}
-          </div>
+            {tab === 'hunt' && (
+              <div className="launch">
+                <div className="loadout">
+                  <small>Loadout</small>
+                  <b>{QUARRY[quarry].name} · {W.name}</b>
+                  <small>{fmt(GAME_TIME)} hunt · Best <span>{best}</span></small>
+                </div>
+                <button className="cta" onClick={play}>Start hunt</button>
+              </div>
+            )}
+            <footer className="menu-foot">{accountLine}</footer>
+          </aside>
         </div>
       )}
       {phase === 'lobby' && (
@@ -357,7 +404,9 @@ export default function App() {
                 : roomData.members.length < 2 ? 'Waiting for at least one more hunter…'
                 : roomData.round === 0 ? `Starts by itself when ${MAX_PLAYERS} have joined, or start now.` : 'Ready for another round.'}
             </div>
-            <div className="label" style={{ marginTop: 16 }}>Your shotgun</div>
+            <div className="label" style={{ marginTop: 16 }}>Quarry for the next round</div>
+            {quarries}
+            <div className="label">Your shotgun</div>
             {guns}
             <div className="menu">
               <button disabled={!canStart} onClick={startHunt}>START HUNT</button>
@@ -372,7 +421,7 @@ export default function App() {
         <div className="endbar">
           <div className="endstats">
             <b>HUNT OVER</b>{result.record && <span className="rec">NEW HIGH SCORE</span>}
-            <span>Score <b>{result.score}</b> · Ducks <b>{result.ducks}</b> · Accuracy {result.shots ? Math.round(result.ducks / result.shots * 100) : 0}% · Best <b>{best}</b></span>
+            <span>Score <b>{result.score}</b> · {Q.many[0].toUpperCase() + Q.many.slice(1)} <b>{result.ducks}</b> · Accuracy {result.shots ? Math.round(result.ducks / result.shots * 100) : 0}% · Best <b>{best}</b></span>
             {netErr && <span className="err">{netErr}</span>}
           </div>
           <div className="endbtns">
