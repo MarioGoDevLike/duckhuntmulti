@@ -44,6 +44,16 @@
   .gun span{font:12px/1.5 Consolas,monospace;color:#b9c2a8}
   .menu{display:flex;flex-direction:column;align-items:center;gap:12px}
   .menu button.ghost{font-size:16px;padding:10px 0;width:220px}
+  button:disabled{opacity:.4;cursor:default}
+  .rooms{margin-top:20px}
+  .rooms .row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+  .rooms input{width:92px;padding:8px 10px;font:16px Consolas,monospace;letter-spacing:3px;text-align:center;text-transform:uppercase;
+               color:#f1e8d0;background:rgba(0,0,0,.3);border:1px solid rgba(241,232,208,.5);border-radius:3px;user-select:text;-webkit-user-select:text}
+  .board.lobby{margin:6px 0 12px}
+  .live{position:absolute;right:max(20px,env(safe-area-inset-right));top:56px;font-size:15px;text-align:right;line-height:1.6}
+  .live .me{color:#ffe07a}
+  .count{position:absolute;left:0;right:0;top:28%;text-align:center;font-size:96px;color:#fff}
+  .count small{display:block;font-size:20px;color:#ffe07a}
   button{font:inherit;font-size:22px;letter-spacing:4px;padding:12px 54px;color:#1a1f14;background:#e2c877;border:0;border-radius:3px;cursor:pointer}
   button:hover{background:#ffe08a}
   .hud{position:fixed;inset:0;pointer-events:none;color:#f1e8d0;text-shadow:0 1px 3px #000}

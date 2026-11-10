@@ -10,6 +10,16 @@ export const WEAPONS = {
 export const TOUCH = matchMedia('(hover: none), (pointer: coarse)').matches; // phones and tablets
 const SHOT_SPEED = 370, EYE = 1.7, TAU = Math.PI * 2; // m/s, m
 const rnd = (a, b) => a + Math.random() * (b - a);
+// Seeded generator: every player in a room gets the same flights from the same seed.
+function mulberry(seed) {
+  return () => {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const slotX = (slot, count) => (slot - (count - 1) / 2) * 5; // hunters stand 5 m apart in a row
 const { clamp, smoothstep, degToRad } = THREE.MathUtils;
 
 // Flat field around the hunter, rolling hills far out.
@@ -98,11 +108,11 @@ function makeAudio() {
   wind.connect(wf).connect(wg).connect(out); wind.start();
   return {
     resume: () => ac.resume(),
-    shot() {
+    shot(v = 1) { // v < 1: another hunter's gun down the line
       const n = ac.currentTime;
-      noise(n, 1, 'lowpass', 6000, 300, 0.8); tone(n, 0.9, 140, 35, 0.3);
+      noise(n, v, 'lowpass', 6000 * v, 300, 0.8); tone(n, 0.9 * v, 140, 35, 0.3);
       noise(n + 0.28, 0.22, 'lowpass', 900, 200, 1.5);                       // echo off the treeline
-      noise(n + 0.12, 0.25, 'bandpass', 2600, 2400, 0.05, 3);                // action cycling
+      if (v === 1) noise(n + 0.12, 0.25, 'bandpass', 2600, 2400, 0.05, 3);   // action cycling
     },
     click: f => noise(ac.currentTime, 0.5, 'bandpass', f, f * 0.9, 0.06, 3),
     thud: () => tone(ac.currentTime, 0.4, 90, 40, 0.15),
@@ -220,31 +230,61 @@ export function createGame(canvas, cb) {
   const hullV = new THREE.Vector3(); let hullT = 0;
   const fMat = new THREE.PointsMaterial({ color: 0xe8e2d4, size: 0.07, transparent: true, opacity: 0.9 });
 
+  // Other hunters in the room: a simple figure that turns and raises the gun as they look around.
+  const HM = { jacket: L(0x4b5a36), pants: L(0x3b3a30), skin: L(0xc99a76), cap: L(0xc0621c) };
+  const flashMat = flash.material;
+  function makeHunter(name) {
+    const g = new THREE.Group(), arms = new THREE.Group();
+    part(g, box, HM.pants, 0.3, 0.8, 0.22, 0, 0.4, 0);
+    part(g, box, HM.jacket, 0.44, 0.62, 0.27, 0, 1.11, 0);
+    part(g, sph, HM.skin, 0.1, 0.12, 0.1, 0, 1.56, 0);
+    part(g, box, HM.cap, 0.21, 0.07, 0.23, 0, 1.66, 0.01);
+    part(g, box, HM.cap, 0.19, 0.015, 0.1, 0, 1.63, -0.14);
+    arms.position.set(0.1, 1.4, -0.05); g.add(arms);
+    part(arms, box, HM.jacket, 0.1, 0.1, 0.42, -0.06, -0.06, -0.2);
+    part(arms, box, metal, 0.035, 0.04, 1.05, 0, 0, -0.45);
+    part(arms, box, wood, 0.045, 0.07, 0.3, 0, -0.03, 0.12);
+    const fl = new THREE.Sprite(flashMat); fl.scale.setScalar(0.9); fl.position.set(0, 0, -1.02); fl.visible = false; arms.add(fl);
+    const c = document.createElement('canvas'); c.width = 256; c.height = 48;
+    const x = c.getContext('2d'); x.font = 'bold 28px Georgia'; x.textAlign = 'center'; x.lineWidth = 5;
+    x.strokeStyle = 'rgba(0,0,0,.7)'; x.strokeText(name, 128, 34); x.fillStyle = '#f1e8d0'; x.fillText(name, 128, 34);
+    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
+    tag.scale.set(1.2, 0.225, 1); tag.position.y = 2.05; g.add(tag);
+    return { g, arms, fl, flT: 0, yaw: 0, pitch: 0, shots: 0 };
+  }
+  const peers = new Map();
+  const clearPeers = () => { peers.forEach(h => scene.remove(h.g)); peers.clear(); };
+
   let audio, raf, last = performance.now(), T = 0, state = 'menu', paused = false, locked = false;
   let yaw = 0, pitch = 0.16, kick = 0, recoil = 0, flashT = 0, spawnT = 1, aim = false, ads = 0, brk = 0, W = WEAPONS.semi;
+  // mp: { seed, startAt (local ms), slot, count } while hunting in a room. R drives flights: seeded in a room.
+  let mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, duckSeq = 0, poseT = 0;
+  const rr = (a, b) => a + R() * (b - a);
   const UP = new THREE.Vector3(0, 1, 0);
   let timeLeft = GAME_TIME, score = 0, bag = 0, shots = 0, shells = W.mag, reloading = false, reloadT = 0, nextShot = 0, lastKill = -9, lastSec = 0;
   const ducks = [], pellets = [], bursts = [];
   const rel = new THREE.Vector3(), rv = new THREE.Vector3(), tmp = new THREE.Vector3();
   const hud = () => cb.onHud({ score, ducks: bag, shells, mag: W.mag, reloading, aiming: aim, time: Math.ceil(timeLeft) });
 
-  function spawn() {
-    const speed = rnd(13, 27), n = Math.random() < 0.4 ? 1 : 2 + (Math.random() * 4 | 0);
+  // lag: seconds this flight is late (tab was hidden), so it appears where it would be by now.
+  function spawn(lag = 0) {
+    const speed = rr(13, 27), n = R() < 0.4 ? 1 : 2 + (R() * 4 | 0);
     const p = new THREE.Vector3(), v = new THREE.Vector3();
-    if (Math.random() < 0.72) { // crossing shot
-      const side = Math.random() < 0.5 ? 1 : -1;
-      p.set(-side * 120, rnd(5, 20), -rnd(14, 50)); v.set(side, rnd(-0.03, 0.03), rnd(-0.1, 0.1));
-    } else {                    // incoming, passing overhead
-      p.set(rnd(-70, 70), rnd(10, 24), -170); v.set(rnd(-25, 25) - p.x, 0, 190);
+    if (R() < 0.72) { // crossing shot
+      const side = R() < 0.5 ? 1 : -1;
+      p.set(-side * 120, rr(5, 20), -rr(14, 50)); v.set(side, rr(-0.03, 0.03), rr(-0.1, 0.1));
+    } else {          // incoming, passing overhead
+      p.set(rr(-70, 70), rr(10, 24), -170); v.set(rr(-25, 25) - p.x, 0, 190);
     }
-    // Birds can come from any side; most flights favour roughly where the hunter is facing.
-    const turn = Math.random() < 0.6 ? yaw + rnd(-1.5, 1.5) : rnd(0, TAU);
+    // Birds can come from any side; most favour where the hunter faces (in a room: the way the line faces).
+    const turn = R() < 0.6 ? (mp ? 0 : yaw) + rr(-1.5, 1.5) : rr(0, TAU);
     p.applyAxisAngle(UP, turn); v.applyAxisAngle(UP, turn);
     v.normalize(); const lat = new THREE.Vector3(-v.z, 0, v.x);
     for (let i = 0; i < n; i++) { // V formation
-      const d = makeDuck(Math.random() < 0.6), k = Math.ceil(i / 2);
-      d.g.position.copy(p).addScaledVector(v, -k * 1.6).addScaledVector(lat, (i % 2 ? 1 : -1) * k * 1.2); d.g.position.y += rnd(-0.4, 0.4);
-      Object.assign(d, { vel: v.clone().multiplyScalar(speed), alive: true, down: false, ph: rnd(0, 6), hz: 5 + speed * 0.14, life: 0, wob: rnd(0, 6), spin: 0 });
+      const d = makeDuck(R() < 0.6), k = Math.ceil(i / 2);
+      d.g.position.copy(p).addScaledVector(v, -k * 1.6).addScaledVector(lat, (i % 2 ? 1 : -1) * k * 1.2); d.g.position.y += rr(-0.4, 0.4);
+      Object.assign(d, { id: duckSeq++, vel: v.clone().multiplyScalar(speed), alive: true, down: false, ph: rr(0, 6), hz: 5 + speed * 0.14, life: 0, wob: rr(0, 6), spin: 0 });
+      d.g.position.addScaledVector(d.vel, lag);
       scene.add(d.g); ducks.push(d);
     }
     if (state === 'play') audio?.quack(0.12 + Math.random() * 0.15);
@@ -257,16 +297,20 @@ export function createGame(canvas, cb) {
     const pts = new THREE.Points(geo, fMat); pts.frustumCulled = false; scene.add(pts); bursts.push({ pts, vel, life: 2.2 });
   }
 
-  function kill(d, range) {
-    const speed = d.vel.length(), dbl = T - lastKill < 1.5; lastKill = T;
+  function drop(d) {
     d.alive = false; d.life = 0; d.spin = rnd(4, 9); d.vel.multiplyScalar(0.85);
     for (const [a, b] of d.wings) { a.rotation.z = 1.1; b.rotation.z = -0.5; }
+    burst(d.g.position);
+  }
+  function kill(d, range) {
+    const speed = d.vel.length(), dbl = T - lastKill < 1.5; lastKill = T;
     const pts = Math.round((40 + range * 2 + speed * 3) * (dbl ? 2 : 1)); score += pts; bag++;
-    cb.onMsg(`${dbl ? 'DOUBLE!  ' : ''}+${pts}  ·  ${range | 0} m`); burst(d.g.position); hud();
+    drop(d); cb.onMsg(`${dbl ? 'DOUBLE!  ' : ''}+${pts}  ·  ${range | 0} m`); hud();
+    cb.onKill?.(d.id, pts); // in a room: claim the bird (first claim wins)
   }
 
   function fire() {
-    if (T < nextShot || (reloading && !W.single)) return; // a broken-open double can't fire
+    if (T < nextShot || elapsed < 0 || (reloading && !W.single)) return; // countdown, or a broken-open double
     if (shells <= 0) { audio.click(1500); reloading = true; hud(); return; }
     reloading = false; reloadT = 0; shells--; shots++; nextShot = T + W.interval; recoil = 1; flashT = 0.05;
     if (!W.single) flash.position.x = flashL.position.x = shells === 1 ? 0.0125 : -0.0125; // right barrel, then left
@@ -275,25 +319,41 @@ export function createGame(canvas, cb) {
     kick = 1;
     for (const d of ducks) if (d.alive) d.vel.y += rnd(0.3, 1.6); // birds flare at the shot
     if (W.single) { hull.position.set(0.14, -0.11, -0.4); hullV.set(1.5, 1.2, 0.2); hullT = 0.5; }
-    hud();
+    hud(); if (mp) cb.onPose?.({ yaw, pitch, shots });
   }
 
   function step(dt) {
     T += dt; uTime.value = T;
     recoil = Math.max(0, recoil - dt * 6); kick = Math.max(0, kick - dt * 4); flashT -= dt;
     if (state === 'play') {
-      timeLeft -= dt;
+      // In a room the clock is shared wall time, so every hunter's round starts and ends together.
+      elapsed = mp ? (Date.now() - mp.startAt) / 1000 : elapsed + dt;
+      timeLeft = GAME_TIME - elapsed;
       if (timeLeft <= 0) {
         timeLeft = 0; state = 'over'; locked = false; document.exitPointerLock?.();
+        mp = null; R = Math.random; clearPeers();
         cb.onEnd({ score, ducks: bag, shots });
       } else {
         if (reloading && shells < W.mag && (reloadT += dt) > W.reload) {
           reloadT = 0; shells = W.single ? shells + 1 : W.mag; audio.click(3200); if (shells === W.mag) reloading = false; hud();
         }
         const sec = Math.ceil(timeLeft); if (sec !== lastSec) { lastSec = sec; hud(); }
+        // Flight schedule runs off the round clock (seeded in a room), so it is identical for every player.
+        while (elapsed >= nextSpawn) {
+          const lag = elapsed - nextSpawn; spawn(lag);
+          nextSpawn += (rr(1.6, 3.6) - 1.2 * Math.min(1, nextSpawn / GAME_TIME)) / (mp ? 1 + 0.25 * (mp.count - 1) : 1);
+        }
+        if (mp && (poseT -= dt) <= 0) { poseT = 0.5; cb.onPose?.({ yaw, pitch, shots }); }
       }
-    } else if (state === 'menu') { yaw = Math.sin(T * 0.12) * 0.35; pitch = 0.16; }
-    if ((spawnT -= dt) <= 0) { spawn(); spawnT = state === 'play' ? rnd(1.6, 3.6) - 1.2 * (1 - timeLeft / GAME_TIME) : rnd(2.5, 5); }
+    } else {
+      if (state === 'menu') { yaw = Math.sin(T * 0.12) * 0.35; pitch = 0.16; }
+      if ((spawnT -= dt) <= 0) { spawn(); spawnT = rnd(2.5, 5); }
+    }
+    for (const h of peers.values()) {
+      const k = Math.min(1, dt * 6);
+      h.g.rotation.y += (h.yaw - h.g.rotation.y) * k; h.arms.rotation.x += (h.pitch - h.arms.rotation.x) * k;
+      h.fl.visible = (h.flT -= dt) > 0;
+    }
 
     // Shot column: travels at SHOT_SPEED and spreads with range. Closest approach is solved against each
     // bird's own velocity, so a fast crosser is only hit when the shot is placed ahead of it.
@@ -357,7 +417,7 @@ export function createGame(canvas, cb) {
   function frame(now) {
     raf = requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
-    if (!paused) step(dt);
+    if (!paused || mp) step(dt); // a room's hunt keeps running while one player sits in the pause menu
     renderer.render(scene, camera);
   }
 
@@ -370,7 +430,11 @@ export function createGame(canvas, cb) {
     yaw -= dx * k; pitch = clamp(pitch - dy * k, -0.2, 1.45);
   };
   const onMove = e => look(e.movementX, e.movementY, 0.0016);
-  const onDown = e => { if (live() && e.target === canvas) { if (e.button === 0) fire(); else if (e.button === 2) setAim(true); } };
+  const onDown = e => {
+    if (!live() || e.target !== canvas) return;
+    if (!TOUCH && !locked) { lock(); return; } // a room's round starts without a click, so the first click grabs the mouse
+    if (e.button === 0) fire(); else if (e.button === 2) setAim(true);
+  };
   const onUp = e => { if (e.button === 2) setAim(false); };
   // Touch: drag on the scene to look. preventDefault stops the browser from also sending fake mouse clicks.
   let tid = null, tx = 0, ty = 0;
@@ -412,18 +476,42 @@ export function createGame(canvas, cb) {
   onResize(); raf = requestAnimationFrame(frame);
 
   return {
-    start(weapon) {
+    // room (optional): { seed, startAt: local ms when the round begins, slot, count }.
+    start(weapon, room) {
       audio ||= makeAudio(); audio.resume();
       W = WEAPONS[weapon] || WEAPONS.semi; semiGun.visible = W.single; sxsGun.visible = !W.single;
       flash.position.x = flashL.position.x = 0; brk = 0;
-      ducks.forEach(d => scene.remove(d.g)); ducks.length = pellets.length = 0;
-      timeLeft = GAME_TIME; score = bag = shots = 0; shells = W.mag; reloading = false; reloadT = 0; nextShot = 0; lastKill = -9; spawnT = 1.5;
+      ducks.forEach(d => scene.remove(d.g)); ducks.length = pellets.length = 0; clearPeers();
+      mp = room || null; R = mp ? mulberry(mp.seed) : Math.random; duckSeq = 0;
+      elapsed = mp ? (Date.now() - mp.startAt) / 1000 : 0; nextSpawn = 1.5; timeLeft = GAME_TIME - elapsed; lastSec = 0;
+      camera.position.x = mp ? slotX(mp.slot, mp.count) : 0;
+      score = bag = shots = 0; shells = W.mag; reloading = false; reloadT = 0; nextShot = 0; lastKill = -9;
       yaw = 0; pitch = 0.2; aim = false; paused = false; state = 'play'; hud(); lock();
     },
     // Abandon the hunt (no score posted) and go back to the drifting menu view.
     quit() {
       state = 'menu'; paused = false; aim = false; reloading = false; locked = false; document.exitPointerLock?.();
+      mp = null; R = Math.random; camera.position.x = 0; clearPeers();
       ducks.forEach(d => scene.remove(d.g)); ducks.length = pellets.length = 0;
+    },
+    unlockAudio() { audio ||= makeAudio(); audio.resume(); }, // call from a click so a room's start has sound
+    // Another hunter claimed this bird first: it falls here too.
+    remoteKill(id) { const d = ducks.find(x => x.id === id && x.alive); if (d) drop(d); },
+    // Our claim lost the race: take the points back.
+    revokeKill(pts) { score = Math.max(0, score - pts); bag = Math.max(0, bag - 1); hud(); },
+    // list: [{ id, name, slot, yaw, pitch, shots }] for the other hunters in the round.
+    setPeers(list) {
+      if (!mp) return;
+      const seen = new Set();
+      for (const p of list) {
+        seen.add(p.id);
+        let h = peers.get(p.id);
+        if (!h) { h = makeHunter(p.name); h.shots = p.shots || 0; h.g.position.set(slotX(p.slot, mp.count), 0, 0); scene.add(h.g); peers.set(p.id, h); }
+        h.yaw = p.yaw || 0; h.pitch = clamp(p.pitch || 0, -0.2, 1.45);
+        if ((p.shots || 0) > h.shots) { h.flT = 0.06; audio?.shot(0.4); }
+        h.shots = p.shots || 0;
+      }
+      for (const [id, h] of peers) if (!seen.has(id)) { scene.remove(h.g); peers.delete(id); }
     },
     resume() { paused = false; lock(); },
     pause,
