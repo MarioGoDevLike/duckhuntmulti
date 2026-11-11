@@ -33,7 +33,7 @@ function ducks({ R, flock, lag, facing, voice }) {
   for (let i = 0; i < n; i++) { // V formation
     const k = Math.ceil(i / 2); d = makeBird('duck', R() < 0.6);
     d.g.position.copy(p).addScaledVector(v, -k * 1.6).addScaledVector(lat, (i % 2 ? 1 : -1) * k * 1.2); d.g.position.y += rr(-0.4, 0.4);
-    flock.add(d, { vel: v.clone().multiplyScalar(speed), alive: true, down: false, ph: rr(0, 6), hz: 5 + speed * 0.14, life: 0, wob: rr(0, 6), spin: 0 }, d.drake, lag);
+    flock.add(d, { vel: v.clone().multiplyScalar(speed), alive: true, down: false, ph: rr(0, 6), hz: 5 + speed * 0.14, life: 0, wob: rr(0, 6) }, d.drake, lag);
   }
   voice?.quack(d.g.position, rnd(0.7, 1));
 }
@@ -52,7 +52,7 @@ function finches({ R, flock, lag, voice }) {
     d = makeBird('finch', R() < 0.55);
     d.g.position.copy(p).addScaledVector(v, -rr(0, 12)).addScaledVector(lat, rr(-6, 6)); d.g.position.y += rr(-2.5, 2.5);
     flock.add(d, { vel: v.clone().multiplyScalar(speed * rr(0.95, 1.05)), alive: true, down: false,
-      ph: 0, life: 0, wob: rr(0, 1), bhz: rr(1.9, 2.5), weave, alt: d.g.position.y, spin: 0 }, d.drake, lag);
+      ph: 0, life: 0, wob: rr(0, 1), bhz: rr(1.9, 2.5), weave, alt: d.g.position.y }, d.drake, lag);
   }
   voice?.chirp(d.g.position, 1);
 }
@@ -64,6 +64,6 @@ function thrush({ R, flock, lag, voice }) {
   const d = makeBird('thrush', true), p = new THREE.Vector3(rr(-38, 38), rr(3.2, 5.8), rr(-41, -35));
   const v = new THREE.Vector3(rr(-14, 14) - p.x * 0.3, 0, 40).normalize();
   d.g.position.copy(p);
-  flock.add(d, { vel: v.multiplyScalar(rr(16, 21)), alive: true, down: false, ph: 0, life: 0, wob: rr(0, 1), alt: rr(6, 13), spin: 0 }, true, lag);
+  flock.add(d, { vel: v.multiplyScalar(rr(16, 21)), alive: true, down: false, ph: 0, life: 0, wob: rr(0, 1), alt: rr(6, 13) }, true, lag);
   voice?.tsip(p);
 }

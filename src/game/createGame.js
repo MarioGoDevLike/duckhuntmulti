@@ -9,8 +9,7 @@ import { TOUCH } from '../config/platform.js';
 import { rnd, mulberry } from '../core/math.js';
 import { createAudio } from '../audio/soundscape.js';
 import { createEnvironment } from '../world/environment.js';
-import { goLimp } from '../entities/birds/bird.js';
-import { fly, fall } from '../entities/birds/flight.js';
+import { fly, fall, startFall } from '../entities/birds/flight.js';
 import { createViewmodel } from '../entities/weapons/viewmodel.js';
 import { createRetriever } from '../entities/retriever/retriever.js';
 import { createHunters } from '../entities/hunters.js';
@@ -65,14 +64,17 @@ export function createGame(canvas, cb) {
   /* ---------- rules ---------- */
   const spawn = (lag = 0) => spawnFlight({ Q, R, flock, lag, facing: mp ? 0 : yaw, voice: state === 'play' ? audio : null });
 
-  function drop(d) {
-    d.alive = false; d.life = 0; d.spin = rnd(4, 9); d.vel.multiplyScalar(0.85);
-    goLimp(d); bursts.spawn(d.g.position);
+  // hit: how the shot took it (see shotColumn), or null for a bird another hunter dropped. Returns how it comes down.
+  function drop(d, hit = null) {
+    d.alive = false; d.life = 0;
+    const how = startFall(d, hit);
+    bursts.spawn(d.g.position, hit ? Math.round(8 + 30 * (1 - hit.u) * (0.4 + 0.6 * hit.e)) : 26, hit?.dir); // a full pattern knocks out more
+    return how;
   }
-  function kill(d, range) {
+  const HOW = { fold: 'clean', wing: 'wing hit', tower: 'towered', glide: 'hit light' };  function kill(d, range, hit) {
     const speed = d.vel.length(), dbl = T - lastKill < 1.5; lastKill = T;
     const pts = Math.round((40 + range * 2 + speed * 3) * Q.pts * (dbl ? 2 : 1)); score += pts; bagged++;
-    drop(d); cb.onMsg(`${dbl ? 'DOUBLE!  ' : ''}+${pts}  ·  ${range | 0} m`); hud();
+    const how = drop(d, hit); cb.onMsg(`${dbl ? 'DOUBLE!  ' : ''}+${pts}  ·  ${range | 0} m  ·  ${HOW[how]}`); hud();
     killLog.set(d.id, 'me');
     cb.onKill?.(d.id, pts); // in a room: claim the bird (first claim wins)
   }

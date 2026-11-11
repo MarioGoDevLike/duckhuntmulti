@@ -2,15 +2,21 @@
 import * as THREE from 'three';
 import { rnd } from '../core/math.js';
 
-const N = 26, LIFE = 2.2; // feathers per burst, seconds
+const LIFE = 2.2; // seconds
 const mat = new THREE.PointsMaterial({ color: 0xe8e2d4, size: 0.07, transparent: true, opacity: 0.9 });
 
 export function createFeatherBursts(scene) {
   const live = [];
   return {
-    spawn(p) {
-      const pos = new Float32Array(N * 3), vel = [];
-      for (let i = 0; i < N; i++) { pos.set([p.x, p.y, p.z], i * 3); vel.push(new THREE.Vector3(rnd(-1, 1), rnd(-0.5, 1.5), rnd(-1, 1)).multiplyScalar(rnd(0.5, 3))); }
+    // n feathers at p; push (optional): the shot's direction, which blows them on through the bird.
+    spawn(p, n = 26, push = null) {
+      const pos = new Float32Array(n * 3), vel = [];
+      for (let i = 0; i < n; i++) {
+        pos.set([p.x, p.y, p.z], i * 3);
+        const v = new THREE.Vector3(rnd(-1, 1), rnd(-0.5, 1.5), rnd(-1, 1)).multiplyScalar(rnd(0.5, 3));
+        if (push) v.addScaledVector(push, rnd(0.5, 4));
+        vel.push(v);
+      }
       const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       const pts = new THREE.Points(geo, mat); pts.frustumCulled = false; scene.add(pts); live.push({ pts, vel, life: LIFE });
     },

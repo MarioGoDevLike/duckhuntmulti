@@ -13,19 +13,28 @@ export const makeBird = (kind, male) => ({ ...(kind === 'finch' ? makeFinch(male
 // Wings closed: the arm swings back along the body (a small bird's drops down against the flank) and the hand lies back along it.
 export function foldWings(d) {
   if (d.rig) { d.rig.fold = 1; d.rig.pose(0, 1); return; }
+  for (const [a] of d.wings) foldWing(d, a);
+}
+function foldWing(d, a) {
   const small = d.kind === 'finch' || d.kind === 'thrush'; // small birds tuck the wings down over the flanks
-  for (const [a] of d.wings) {
-    // Small birds roll the closed wing onto its edge (about its own length), leading edge up, before swinging it
-    // back, and drop it to the flank so it lies against the body; ducks keep it folded flat over the back.
-    a.rotation.order = 'ZYX'; a.rotation.set(small ? -1.3 : 0, small ? 1.42 : 1.35, 0); a.position.y = -(d.foldDrop || 0);
-    a.scale.z = small ? 0.45 : 1; // feathers stack as the wing closes
-  }
+  // Small birds roll the closed wing onto its edge (about its own length), leading edge up, before swinging it
+  // back, and drop it to the flank so it lies against the body; ducks keep it folded flat over the back.
+  a.rotation.order = 'ZYX'; a.rotation.set(small ? -1.3 : 0, small ? 1.42 : 1.35, 0); a.position.y = -(d.foldDrop || 0);
+  a.scale.z = small ? 0.45 : 1; // feathers stack as the wing closes
 }
 
-// Shot: limp, wings half raised as it tumbles.
-export function goLimp(d) {
-  for (const [a, b] of d.wings) { a.rotation.z = 1.1; b.rotation.z = -0.5; }
-  if (d.rig) { d.rig.fold = 0.15; d.rig.pose(0.55, 0.15); }
+// Each wing on its own, for a shot bird: stroke −1 (down) … 0 (spread level) … 1 (raised), fold 0 (open) … 1 (closed).
+// The first pair is the wing on the bird's +x side, the second the −x wing. A procedural wing opens or closes outright;
+// an open one's hand droops as the arm is raised, as a limp wing does in the airflow.
+export function poseWings(d, sx, fx, s2, f2) {
+  if (d.rig) { d.rig.fold = Math.max(fx, f2); d.rig.pose(sx, fx, s2, f2); return; }
+  const duck = d.kind === 'duck', base = duck ? 0.12 : 0.15, amp = duck ? 0.62 : 0.85, hand = duck ? 0.5 : 0.45;
+  d.wings.forEach(([a, b], i) => {
+    const s = i ? s2 : sx, f = i ? f2 : fx; // wings[0] is the +x wing (see buildBird)
+    if (f > 0.5) { foldWing(d, a); return; }
+    a.position.y = 0; a.scale.z = 1; a.rotation.set(0, 0, base + amp * s);
+    b.rotation.set(0, 0, hand * s * 0.5 - 0.9 * Math.max(0, s - 0.4));
+  });
 }
 
 // Once a chaffinch or a duck is down, its procedural model gives way to the real one: the chaffinch scan (already

@@ -12,7 +12,7 @@ export function createShotColumn() {
   return {
     fire(pos, dir) { shots.push({ pos, dir, dist: 0, hit: false, miss: 1e9, hint: '' }); },
     clear() { shots.length = 0; },
-    // onHit(bird, range) when the pattern takes a bird · onMiss(hint) when a shot flies out having only just missed.
+    // onHit(bird, range, hit) when the pattern takes a bird · onMiss(hint) when a shot flies out having only just missed.
     update(dt, birds, Q, onHit, onMiss) {
       for (let i = shots.length - 1; i >= 0; i--) {
         const s = shots[i];
@@ -20,8 +20,12 @@ export function createShotColumn() {
           if (!d.alive) continue;
           rel.copy(s.pos).sub(d.g.position); rv.copy(s.dir).multiplyScalar(SHOT_SPEED).sub(d.vel);
           const tt = clamp(-rel.dot(rv) / rv.lengthSq(), 0, dt); rel.addScaledVector(rv, tt);
-          const miss = rel.length(), range = s.dist + SHOT_SPEED * tt;
-          if (miss < Q.hitR + range * 0.013 && Math.random() < (Q.reach - range) / Q.fade) { onHit(d, range); s.hit = true; }
+          const miss = rel.length(), range = s.dist + SHOT_SPEED * tt, r = Q.hitR + range * 0.013;
+          if (miss < r && Math.random() < (Q.reach - range) / Q.fade) {
+            // How the bird was struck, for the way it falls: where the pattern's centre passed it (off, from the bird's
+            // centre), along which line, how near the core of the pattern it was (u) and how much energy the pellets kept (e).
+            onHit(d, range, { off: rel.clone(), dir: s.dir.clone(), r, u: miss / r, e: clamp(1 - range / Q.reach, 0, 1) }); s.hit = true;
+          }
           else if (miss < s.miss) {
             const along = rel.dot(d.vel) / d.vel.length(); s.miss = miss;
             s.hint = Math.abs(along) > Math.abs(rel.y) ? (along > 0 ? 'Too far ahead' : 'Behind — lead more') : (rel.y > 0 ? 'Over the top' : 'Underneath');

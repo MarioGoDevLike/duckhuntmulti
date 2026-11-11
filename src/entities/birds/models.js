@@ -59,19 +59,26 @@ const thrushReady = loadModel(thrushModelUrl, 'Thrush').then(gl => {
   bones.forEach((b, i) => b.quaternion.copy(MID[i]));
   // Centre the body on the origin (the model stands its body ~1.8 units up and forward of it).
   root.scale.setScalar(THRUSH_SCALE); root.position.set(0, -0.33 * THRUSH_SCALE, -0.1 * THRUSH_SCALE);
-  thrushRig = { root, UP, MID, DOWN, FOLD, FOLD_SPAN, names: bones.map(b => b.name) };
+  // Which of the model's wings lies on the bird's +x side, so one wing can be posed on its own (a shot bird with one
+  // wing broken).
+  root.updateMatrixWorld(true);
+  const rIsPlusX = findBone(root, 'wingLength03_r_').getWorldPosition(new THREE.Vector3()).x > 0;
+  thrushRig = { root, UP, MID, DOWN, FOLD, FOLD_SPAN, names: bones.map(b => b.name), plusX: bones.map(b => b.name.includes('_r_') === rIsPlusX) };
 });
 // { g, wings: [], rig } — rig.pose(stroke, fold): stroke −1 (wings down) … 0 (spread) … 1 (up); fold 0 (open) … 1 (closed).
+// rig.pose(stroke, fold, stroke2, fold2) poses the bird's +x wing with the first pair and its −x wing with the second.
 export function makeThrushModel() {
   const K = thrushRig; if (!K) return null;
   const g = new THREE.Group(), m = cloneSkinned(K.root); g.add(m);
-  const bones = K.names.map(n => m.getObjectByName(n)), roots = bones.filter(b => b.name.startsWith('wingLength01'));
+  const bones = K.names.map(n => m.getObjectByName(n));
   const rig = {
     fold: 0,
-    pose(stroke, fold) {
-      const to = stroke >= 0 ? K.UP : K.DOWN, t = Math.abs(stroke);
-      bones.forEach((b, i) => b.quaternion.slerpQuaternions(K.MID[i], to[i], t).slerp(K.FOLD[i], fold));
-      for (const r of roots) r.scale.set(1, 1 + (K.FOLD_SPAN - 1) * fold, 1);
+    pose(stroke, fold, stroke2 = stroke, fold2 = fold) {
+      bones.forEach((b, i) => {
+        const s = K.plusX[i] ? stroke : stroke2, f = K.plusX[i] ? fold : fold2;
+        b.quaternion.slerpQuaternions(K.MID[i], (s >= 0 ? K.UP : K.DOWN)[i], Math.abs(s)).slerp(K.FOLD[i], f);
+        if (b.name.startsWith('wingLength01')) b.scale.set(1, 1 + (K.FOLD_SPAN - 1) * f, 1);
+      });
     },
   };
   rig.pose(0, 1);
