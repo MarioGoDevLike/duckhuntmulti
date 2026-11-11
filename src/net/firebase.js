@@ -28,15 +28,20 @@ export const watchUser = cb => (enabled ? onAuthStateChanged(auth, cb) : () => {
 export const login = () => signInWithPopup(auth, new GoogleAuthProvider());
 export const logout = () => signOut(auth);
 
-// One document per player (id = uid), holding only their best game.
-export async function submitScore(user, score, ducks) {
-  const ref = doc(db, 'scores', user.uid), snap = await getDoc(ref);
+/* ---------- leaderboards ----------
+   leaderboards/{quarry}/scores/{uid}   { name, score, ducks (birds bagged), updatedAt }
+   One board per quarry (duck | finch | thrush), one document per player on each, holding only their best hunt there.
+   (The single board from before quarry choice, scores/{uid}, is no longer read.) */
+const boardScores = quarry => collection(db, 'leaderboards', quarry, 'scores');
+
+export async function submitScore(user, quarry, score, ducks) {
+  const ref = doc(boardScores(quarry), user.uid), snap = await getDoc(ref);
   if (snap.exists() && snap.data().score >= score) return;
   await setDoc(ref, { name: user.displayName || 'Hunter', score, ducks, updatedAt: serverTimestamp() });
 }
 
-export async function topScores(n = 10) {
-  const snap = await getDocs(query(collection(db, 'scores'), orderBy('score', 'desc'), limit(n)));
+export async function topScores(quarry, n = 10) {
+  const snap = await getDocs(query(boardScores(quarry), orderBy('score', 'desc'), limit(n)));
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
