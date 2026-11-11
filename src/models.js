@@ -8,7 +8,16 @@
 // a shaped bill, glossy eyes, tucked legs, and wings made of individual feathers (a covert panel and a row of
 // secondaries on the arm, fanned primaries on the hand), plus a fanned tail. Bird space: facing +z.
 // Every bird returns { g, wings: [[inner, outer], ...] } — inner flaps about z and folds about y, outer is the hand.
+//
+// Where a real model exists the game uses it instead (see "Loaded bird models"): the thrush is a rigged model
+// that flies, a downed chaffinch is a photogrammetry scan, and a downed mallard is a sculpted model.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import chaffinchScanUrl from './assets/chaffinch.glb?url';
+import thrushModelUrl from './assets/thrush_3D.glb?url';
+import mallardModelUrl from './assets/duck_3d.glb?url';
+import labradorModelUrl from './assets/labrador.glb?url';
 
 const TAU = Math.PI * 2;
 const { clamp, smoothstep, lerp } = THREE.MathUtils;
@@ -348,6 +357,150 @@ export function makeFinch(male) {
       },
     },
   });
+}
+
+/* ======================================================================================================
+   Loaded bird models (Sketchfab, CC-BY-4.0; credited in the menu)
+   Each loads once in the background; until it arrives, or if it fails, the procedural bird stands in.
+   Clones share geometry and textures, so a sky or a pile full of them costs little.
+   ====================================================================================================== */
+const gltf = new GLTFLoader();
+const loadModel = (url, what) => new Promise(done => gltf.load(url, done, undefined, e => {
+  console.warn(`${what} model unavailable; using the procedural bird`, e); done(null);
+}));
+const finish = (root, side = THREE.FrontSide) => root.traverse(o => {
+  if (!o.isMesh) return;
+  o.material.envMapIntensity = 0.5; o.material.side = side;
+  if (o.isSkinnedMesh) o.frustumCulled = false; // the wings sweep far outside the bind-pose bounds
+});
+
+/* ---------- Chaffinch: photogrammetry scan, downed birds only ---------- */
+// "Dead Chaffinch" by b-unicycling, a scan of a male lying on bark mulch. assets/chaffinch.glb is the bird cut out
+// of that scan (dead_chaffinch.glb): ground removed, underside sealed, texture cut to 2048². Bird space: lying on
+// its side, head toward +z, resting on y = 0, ~0.38 long like makeFinch. No rig, so flying chaffinches stay procedural.
+let chaffinchScan = null;
+const chaffinchReady = loadModel(chaffinchScanUrl, 'Chaffinch').then(gl => { if (gl) { finish(gl.scene, THREE.DoubleSide); chaffinchScan = gl.scene; } });
+export const makeFinchCarcass = () => chaffinchScan?.clone() ?? null;
+
+/* ---------- Mallard: sculpted drake, downed birds and the menu card ---------- */
+// "Realistic Mallard Duck - Game Ready Asset" by 3Dima. A standing drake facing +z, centred on the origin, 1.0 long;
+// scaled to the procedural duck's 0.96. Static (no rig), so flying ducks stay procedural; on the ground it is laid on
+// its side — on its belly the upright neck would read as a live, sitting duck.
+let mallard = null;
+const mallardReady = loadModel(mallardModelUrl, 'Mallard').then(gl => {
+  if (!gl) return;
+  finish(gl.scene); const g = new THREE.Group(); gl.scene.scale.setScalar(0.96); g.add(gl.scene); mallard = g;
+});
+export const makeMallardModel = () => mallard?.clone() ?? null;
+
+/* ---------- Thrush: rigged, flies ---------- */
+// "Swainson's Thrush - in Flight" by osuecampus: a skinned thrush with a wingbeat clip. The clip is keyed as four
+// held poses (stop-motion when played), so three of them are sampled — wings up, spread, down — and the wings are
+// driven by blending between them, plus a folded pose built here for closed-wing dips and birds on the ground.
+// Bird space as makeThrush: facing +z, centred on the body, ~0.43 long and ~0.66 across the spread wings.
+const THRUSH_SCALE = 0.185, WING_BONES = ['wingLength01', 'wingLength02', 'wingLength03'];
+let thrushRig = null;
+const thrushReady = loadModel(thrushModelUrl, 'Thrush').then(gl => {
+  if (!gl) return;
+  const root = gl.scene; finish(root, THREE.DoubleSide); root.updateMatrixWorld(true);
+  const bones = ['r', 'l'].flatMap(s => WING_BONES.map(n => findBone(root, `${n}_${s}`)));
+  const mixer = new THREE.AnimationMixer(root), act = mixer.clipAction(gl.animations[0]); act.play();
+  const sample = t => { mixer.setTime(t); return bones.map(b => b.quaternion.clone()); };
+  const UP = sample(0), MID = sample(0.25), DOWN = sample(0.5);
+  act.stop(); mixer.uncacheRoot(root);
+  // Folded: from the spread pose, collapse each wing's span toward the body (the feathers already trail to the tail),
+  // sweep the tips in and drape the wing down over the flank. Rotations about the model's own axes; tuned by eye.
+  bones.forEach((b, i) => b.quaternion.copy(MID[i]));
+  const FOLD_SPAN = 0.18;
+  for (const [s, sg] of [['r', 1], ['l', -1]]) {
+    const w = findBone(root, `wingLength01_${s}`);
+    for (const [axis, ang] of [[[0, 1, 0], -0.4 * sg], [[0, 0, 1], -0.85 * sg], [[1, 0, 0], 0.15]]) {
+      root.updateMatrixWorld(true);
+      const pw = w.parent.getWorldQuaternion(new THREE.Quaternion());
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(...axis), ang);
+      w.quaternion.premultiply(pw.clone().invert().multiply(q).multiply(pw));
+    }
+  }
+  const FOLD = bones.map(b => b.quaternion.clone());
+  bones.forEach((b, i) => b.quaternion.copy(MID[i]));
+  // Centre the body on the origin (the model stands its body ~1.8 units up and forward of it).
+  root.scale.setScalar(THRUSH_SCALE); root.position.set(0, -0.33 * THRUSH_SCALE, -0.1 * THRUSH_SCALE);
+  thrushRig = { root, UP, MID, DOWN, FOLD, FOLD_SPAN, names: bones.map(b => b.name) };
+});
+function findBone(root, prefix) { let f = null; root.traverse(o => { if (!f && o.isBone && o.name.startsWith(prefix + '_')) f = o; }); return f; }
+// { g, wings: [], rig } — rig.pose(stroke, fold): stroke −1 (wings down) … 0 (spread) … 1 (up); fold 0 (open) … 1 (closed).
+export function makeThrushModel() {
+  const K = thrushRig; if (!K) return null;
+  const g = new THREE.Group(), m = cloneSkinned(K.root); g.add(m);
+  const bones = K.names.map(n => m.getObjectByName(n)), roots = bones.filter(b => b.name.startsWith('wingLength01'));
+  const rig = {
+    fold: 0,
+    pose(stroke, fold) {
+      const to = stroke >= 0 ? K.UP : K.DOWN, t = Math.abs(stroke);
+      bones.forEach((b, i) => b.quaternion.slerpQuaternions(K.MID[i], to[i], t).slerp(K.FOLD[i], fold));
+      for (const r of roots) r.scale.set(1, 1 + (K.FOLD_SPAN - 1) * fold, 1);
+    },
+  };
+  rig.pose(0, 1);
+  return { g, wings: [], rig };
+}
+// Resolves once every model has loaded or given up; the menu re-renders its bird cards then.
+export const birdModelsReady = Promise.all([chaffinchReady, mallardReady, thrushReady]);
+
+/* ---------- Retriever: rigged Labrador ---------- */
+// "Labrador Dog" by kenchoo. assets/labrador.glb is labrador_dog.glb slimmed for the web (duplicate UV sets and
+// tangents dropped, textures re-encoded as JPEG; 9.8 → 5.0 MB). It stands facing +z on y = 0 and carries a 13 s idle
+// (breathing, ears, tail, a sniff). It has no run, so the gallop is laid over the idle on the leg bones here.
+// Scaled to the procedural dog's size (~0.83 tall), big enough to carry a mallard.
+const DOG_SCALE = 0.3, TAU2 = Math.PI * 2;
+// [upper bone, lower bone, phase offset, swing, knee/hock fold]: fore pair and hind pair in opposition, the right
+// of each pair a little behind the left (a rotary gallop rather than a pronk). Swing + is backward.
+const GAIT = [['FrontUpperLegL', 'FrontLowerLegL', 0, 0.55, 0.9], ['FrontUpperLegR', 'FrontLowerLegR', 0.35, 0.55, 0.9],
+  ['BackUpperLegL', 'BackLowerLegL', Math.PI, 0.45, 0.7], ['BackUpperLegR', 'BackLowerLegR', Math.PI + 0.35, 0.45, 0.7]];
+let labrador = null;
+export const dogModelReady = loadModel(labradorModelUrl, 'Labrador').then(gl => {
+  if (!gl) return;
+  const root = gl.scene; finish(root, THREE.DoubleSide);
+  const bone = p => { let f = null; root.traverse(o => { if (!f && o.isBone && o.name.startsWith(p)) f = o; }); return f; };
+  // Rest pose = the idle's first frame, which is where the axes and the mouth are measured.
+  const mixer = new THREE.AnimationMixer(root), act = mixer.clipAction(gl.animations[0]); act.play(); mixer.setTime(0);
+  root.updateMatrixWorld(true);
+  // Each leg bone swings about the dog's side axis; express that axis in the bone's parent frame once.
+  const sideIn = b => new THREE.Vector3(1, 0, 0).applyQuaternion(b.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
+  const gait = GAIT.map(([u, l, off, swing, fold]) => { const up = bone(u), lo = bone(l); return { up: up.name, lo: lo.name, upAxis: sideIn(up), loAxis: sideIn(lo), off, swing, fold }; });
+  // The jaws: just behind and below the nose tip, as a point in the head bone's frame.
+  const head = bone('Head'), mouth = head.worldToLocal(new THREE.Vector3(0, 2.14, 2.3));
+  act.stop(); mixer.uncacheRoot(root);
+  root.scale.setScalar(DOG_SCALE);
+  labrador = { root, clip: gl.animations[0], gait, head: head.name, mouth };
+});
+// { g, head, mouth, animate(dt, running, t) } — the same shape as the procedural dog, so either can retrieve.
+export function makeLabrador() {
+  const K = labrador; if (!K) return null;
+  const g = new THREE.Group(), m = cloneSkinned(K.root); g.add(m);
+  const mixer = new THREE.AnimationMixer(m), idle = mixer.clipAction(K.clip); idle.play();
+  const legs = K.gait.map(L => ({ ...L, up: m.getObjectByName(L.up), lo: m.getObjectByName(L.lo), baseUp: new THREE.Quaternion(), baseLo: new THREE.Quaternion() }));
+  const q = new THREE.Quaternion(); let ph = 0, run = 0, posed = false;
+  return {
+    g, head: m.getObjectByName(K.head), mouth: K.mouth.clone(),
+    animate(dt, running) {
+      // The mixer only rewrites a bone when its animated value changes, so put back the idle pose under last
+      // frame's gallop first; otherwise the gallop would pile up on legs the idle holds still.
+      if (posed) for (const L of legs) { L.up.quaternion.copy(L.baseUp); L.lo.quaternion.copy(L.baseLo); }
+      mixer.update(dt);
+      for (const L of legs) { L.baseUp.copy(L.up.quaternion); L.baseLo.copy(L.lo.quaternion); }
+      posed = true;
+      run += ((running ? 1 : 0) - run) * Math.min(1, dt * 8); // ease into and out of the gallop
+      if (run < 0.01) { m.position.y = 0; m.rotation.x = 0; return; }
+      ph += dt * TAU2 * 2.4;
+      for (const L of legs) {
+        L.up.quaternion.premultiply(q.setFromAxisAngle(L.upAxis, L.swing * Math.sin(ph + L.off) * run));
+        L.lo.quaternion.premultiply(q.setFromAxisAngle(L.loAxis, L.fold * Math.max(0, Math.cos(ph + L.off)) * run));
+      }
+      m.position.y = Math.abs(Math.sin(ph)) * 0.035 * run; // the bound
+      m.rotation.x = Math.sin(ph) * 0.05 * run;            // and the rock of the back
+    },
+  };
 }
 
 /* ---------- Song thrush (Summan) ---------- */

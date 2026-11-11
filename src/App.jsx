@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createGame, birdPortraits, WEAPONS, QUARRY, GAME_TIME, TOUCH } from './engine.js';
+import { createGame, birdPortraits, birdModelsReady, WEAPONS, QUARRY, GAME_TIME, TOUCH } from './engine.js';
 import semiPic from './assets/a800x_pic2.png';
 import ouPic from './assets/over_under.png';
 import {
@@ -67,7 +67,9 @@ export default function App() {
     };
   }, []);
   const [tab, setTab] = useState('hunt');
-  const [portraits] = useState(() => birdPortraits()); // rendered once from the 3D models // main menu tab: hunt | friends | board | controls
+  // Rendered from the 3D models; again once the loaded bird models have arrived. (tab: hunt | friends | board | controls)
+  const [portraits, setPortraits] = useState(() => birdPortraits());
+  useEffect(() => { let live = true; birdModelsReady.then(() => live && setPortraits(birdPortraits())); return () => { live = false; }; }, []);
   const net = useRef({ round: 0 });
 
   useEffect(() => {
@@ -382,7 +384,16 @@ export default function App() {
                 <button className="cta" onClick={play}>Start hunt</button>
               </div>
             )}
-            <footer className="menu-foot">{accountLine}</footer>
+            <footer className="menu-foot">
+              {accountLine}
+              <div className="credits">
+                3D models (CC BY 4.0, Sketchfab):{' '}
+                <a href="https://sketchfab.com/3d-models/dead-chaffinch-dfeff4e123e54952b3acbd3de864fd7f" target="_blank" rel="noreferrer">“Dead Chaffinch”</a> by b-unicycling (cut out of its ground) ·{' '}
+                <a href="https://sketchfab.com/3d-models/swainsons-thrush-in-flight-8784ede7ab0a46ad9967a772676e5c47" target="_blank" rel="noreferrer">“Swainson's Thrush - in Flight”</a> by osuecampus (wingbeat re-posed) ·{' '}
+                <a href="https://sketchfab.com/3d-models/realistic-mallard-duck-game-ready-asset-dd33cd2e30944a4aae2de1a06a828f4f" target="_blank" rel="noreferrer">“Realistic Mallard Duck”</a> by 3Dima ·{' '}
+                <a href="https://sketchfab.com/3d-models/labrador-dog-1f56cfbab07e4fe49b5d9e521c82073a" target="_blank" rel="noreferrer">“Labrador Dog”</a> by kenchoo (gallop added)
+              </div>
+            </footer>
           </aside>
         </div>
       )}

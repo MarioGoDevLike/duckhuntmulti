@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import { makeSemiAuto, makeOverUnder, OU_BARRELS, makeDuck, makeFinch, makeThrush } from './models.js';
+import { makeSemiAuto, makeOverUnder, OU_BARRELS, makeDuck, makeFinch, makeThrush, makeFinchCarcass, makeMallardModel, makeThrushModel,
+  makeLabrador, dogModelReady } from './models.js';
+export { birdModelsReady } from './models.js';
 import duckSoundUrl from './assets/duck_sound.mp3';
 import finchSoundUrl from './assets/fringello_calls.mp3';   // 24 song phrases cut from fringello_sound.mp3
 import thrushSoundUrl from './assets/thrush_calls.mp3';     // 24 song phrases cut from thrush_sound.mp3
@@ -17,7 +19,7 @@ export const WEAPONS = {
 // with range; pts: score multiplier; bag: how the birds are laid out on the grass afterwards.
 export const QUARRY = {
   duck: { kind: 'duck', name: 'Mallard', line: 'Steady flights over the marsh', speed: 3, skill: 2, desc: 'Marsh ducks · steady, straight flight · longer shots', one: 'duck', many: 'ducks',
-          hitR: 0.26, reach: 64, fade: 24, pts: 1, rest: 0.12, open: false, grove: false, upturn: false, gap: [1.6, 3.6], bag: { cols: 6, dx: 0.46, dz: 0.9, front: -2.4 } },
+          hitR: 0.26, reach: 64, fade: 24, pts: 1, rest: 0.12, open: false, grove: false, upturn: false, gap: [1.6, 3.6], bag: { cols: 6, dx: 0.78, dz: 0.9, front: -2.4 } }, // dx: a duck on its side is ~0.7 across
   finch: { kind: 'finch', name: 'Fringello', line: 'Bounding flocks over open ground', speed: 3, skill: 5, desc: 'Chaffinch flocks · bounding, jinking flight · short, quick shots', one: 'bird', many: 'birds',
            hitR: 0.15, reach: 46, fade: 16, pts: 1.6, rest: 0.05, open: true, grove: false, upturn: true, gap: [6, 9], bag: { cols: 8, dx: 0.24, dz: 0.42, front: -1.8 } },
   thrush: { kind: 'thrush', name: 'Thrush', line: 'Bursts from the trees, one by one', speed: 5, skill: 4, desc: 'Summan · bursts out of the trees one at a time · fast, direct flight', one: 'thrush', many: 'thrushes',
@@ -85,9 +87,11 @@ const L = color => new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide
 function part(parent, geo, mat, sx, sy, sz, x, y, z) {
   const o = new THREE.Mesh(geo, mat); o.scale.set(sx, sy, sz); o.position.set(x, y, z); parent.add(o); return o;
 }
-const makeBird = (kind, male) => ({ ...(kind === 'finch' ? makeFinch(male) : kind === 'thrush' ? makeThrush() : makeDuck(male)), kind });
+// The thrush is the rigged model once it has loaded (d.rig drives its wings); the rest are procedural in flight.
+const makeBird = (kind, male) => ({ ...(kind === 'finch' ? makeFinch(male) : kind === 'thrush' ? makeThrushModel() ?? makeThrush() : makeDuck(male)), kind });
 // Wings closed: the arm swings back along the body (a small bird's drops down against the flank) and the hand lies back along it.
 function foldWings(d) {
+  if (d.rig) { d.rig.fold = 1; d.rig.pose(0, 1); return; }
   const finch = d.kind === 'finch' || d.kind === 'thrush'; // small birds tuck the wings down over the flanks
   for (const [a, b] of d.wings) {
     // Small birds roll the closed wing onto its edge (about its own length), leading edge up, before swinging it
@@ -96,9 +100,36 @@ function foldWings(d) {
   }
 }
 
+// Once a chaffinch or a duck is down, its procedural model gives way to the real one: the chaffinch scan (already
+// lying on its side, so laid flat: lie 0) or the mallard (standing, so laid on its side: lie π/2). The rigged thrush
+// needs no swap; it folds its wings. Until a model has loaded (or if it failed) the bird keeps its procedural model.
+const CARCASS = { finch: makeFinchCarcass, duck: makeMallardModel };
+// Turns the chaffinch scan's upper side toward a viewer looking down -z, head to the left (in the hand, on its card).
+const SCAN_FACE = new THREE.Euler(Math.PI / 2 - 0.35, 0, -Math.PI / 2 - 0.4, 'ZYX');
+function toCarcass(d) {
+  if (d.carcass) return;
+  const c = CARCASS[d.kind]?.(); if (!c) return;
+  d.g.traverse(o => o.geometry?.dispose()); // each procedural bird builds its own geometry; materials are shared kits
+  d.g.clear(); c.scale.multiplyScalar(1 / d.g.scale.x); d.g.add(c);
+  d.carcass = true; d.wings = []; d.scan = d.kind === 'finch'; d.lie = d.scan ? 0 : Math.PI / 2;
+}
+// Rest a downed bird on the ground (ground height y0) heading `yaw`, rolled `roll` onto a side or its back (a model
+// with its own way of lying overrides that). Procedural birds sit up by their `rest`; models on their lowest point.
+const restBox = new THREE.Box3();
+function lay(d, y0, yaw, roll) {
+  const g = d.g; g.rotation.set(0, yaw, d.lie ?? roll);
+  if (!d.carcass && !d.rig) { g.position.y = y0 + (QUARRY[d.kind] || QUARRY.duck).rest; return; }
+  g.position.y = 0; g.updateMatrixWorld(true);
+  g.traverse(o => { if (o.isSkinnedMesh) o.computeBoundingBox(); }); // the cached bounds are of an earlier pose
+  const parentY = g.parent ? g.parent.getWorldPosition(tmpV).y : 0;
+  g.position.y = y0 - (restBox.setFromObject(g, true).min.y - parentY);
+}
+const tmpV = new THREE.Vector3();
+
 /* ---------- retriever ---------- */
+// Stand-in until the rigged Labrador (makeLabrador) has loaded, and the fallback if it can't.
 // Yellow Labrador facing +z, standing on y = 0. Legs pivot at the hip and shoulder so they can gallop; the head
-// carries a "mouth" point where a retrieved bird is held.
+// carries a "mouth" point where a retrieved bird is held. Same shape as makeLabrador: { g, head, mouth, animate }.
 function makeDog() {
   const coat = new THREE.MeshStandardMaterial({ color: 0xd2a35c, roughness: 0.9 });
   const dark = new THREE.MeshStandardMaterial({ color: 0xa87a3c, roughness: 0.9 });
@@ -122,7 +153,15 @@ function makeDog() {
   }
   const tail = new THREE.Group(); tail.position.set(0, 0.56, -0.34); g.add(tail);
   const t = cap(0.035, 0.3, coat); t.position.set(0, 0, -0.17); t.rotation.x = Math.PI / 2 + 0.5; tail.add(t);
-  return { g, legs, tail, head, body, mouth: new THREE.Vector3(0, -0.06, 0.2) };
+  return {
+    g, head, mouth: new THREE.Vector3(0, -0.06, 0.2),
+    animate(dt, running, t) { // gallop while running; sit (haunches down, tail sweeping) at rest
+      const k = running ? Math.sin(t * 14) : 0;
+      legs.forEach((l, i) => { l.rotation.x = running ? k * (i < 2 ? 0.7 : -0.7) : (i < 2 ? 0 : -1.25); });
+      body.rotation.x = Math.PI / 2 + (running ? 0 : -0.45); body.position.y = running ? 0.5 + Math.abs(k) * 0.04 : 0.4;
+      tail.rotation.y = Math.sin(t * (running ? 8 : 3)) * 0.5;
+    },
+  };
 }
 
 // Studio portraits of each quarry, rendered once from the game's own models for the menu cards.
@@ -137,7 +176,12 @@ export function birdPortraits(w = 360, h = 220) {
     const key = new THREE.DirectionalLight(0xffe4c4, 2.8); key.position.set(2, 3, 3); scene.add(key);
     const rim = new THREE.DirectionalLight(0xbfd4ff, 1.6); rim.position.set(-3, 1.5, -2); scene.add(rim);
     for (const kind of Object.keys(QUARRY)) {
-      const d = makeBird(kind, true); foldWings(d); d.g.rotation.set(0.08, -1.0, 0); scene.add(d.g);
+      // The real models make the better portraits: the standing drake, and the chaffinch scan turned to the camera.
+      const card = kind === 'duck' ? makeMallardModel() : kind === 'finch' ? makeFinchCarcass() : null;
+      const d = card ? { g: card, wings: [] } : makeBird(kind, true); foldWings(d);
+      if (kind === 'finch' && card) d.g.quaternion.setFromEuler(SCAN_FACE); else d.g.rotation.set(0.08, -1.0, 0);
+      scene.add(d.g);
+      d.g.updateMatrixWorld(true); d.g.traverse(o => { if (o.isSkinnedMesh) o.computeBoundingBox(); }); // frame the folded pose
       const box = new THREE.Box3().setFromObject(d.g), c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3()).length();
       cam.position.set(c.x + size * 0.08, c.y + size * 0.22, c.z + size * 1.05); cam.lookAt(c);
       r.render(scene, cam); out[kind] = r.domElement.toDataURL('image/png'); scene.remove(d.g);
@@ -615,6 +659,7 @@ export function createGame(canvas, cb) {
   function drop(d) {
     d.alive = false; d.life = 0; d.spin = rnd(4, 9); d.vel.multiplyScalar(0.85);
     for (const [a, b] of d.wings) { a.rotation.z = 1.1; b.rotation.z = -0.5; }
+    if (d.rig) { d.rig.fold = 0.15; d.rig.pose(0.55, 0.15); } // limp, wings half raised as it tumbles
     burst(d.g.position);
   }
   function kill(d, range) {
@@ -665,11 +710,10 @@ export function createGame(canvas, cb) {
       birds.forEach((drake, i) => {
         const r = i / COLS | 0, inRow = Math.min(COLS, birds.length - r * COLS);
         const d = makeBird(Q.kind, drake);
-        foldWings(d);
-        d.g.position.set(cx + (i % COLS - (inRow - 1) / 2) * DX + rnd(-0.03, 0.03), 0.12, FRONT - r * DZ + rnd(-0.05, 0.05));
-        d.g.position.y = Q.rest;
+        toCarcass(d); foldWings(d);
+        d.g.position.set(cx + (i % COLS - (inRow - 1) / 2) * DX + rnd(-0.03, 0.03), 0, FRONT - r * DZ + rnd(-0.05, 0.05));
         // Ducks lie on their bellies; small birds are laid on their backs, breast up, as in a gamebag.
-        d.g.rotation.set(0, Math.PI + rnd(-0.08, 0.08), (Q.upturn ? Math.PI : 0) + rnd(-0.35, 0.35));
+        lay(d, 0, Math.PI + rnd(-0.08, 0.08), (Q.upturn ? Math.PI : 0) + rnd(-0.35, 0.35));
         bagGroup.add(d.g);
       });
       const lines = e.name ? [e.name, e.sub || ''] : birds.length ? [] : ['No birds this time'];
@@ -688,7 +732,13 @@ export function createGame(canvas, cb) {
   /* ---------- the retriever and the pile beside the hunter ---------- */
   // Our birds that land within reach are fetched one at a time and laid next to the hunter. Birds the dog
   // does not get to simply stay where they fell.
-  const dog = makeDog(); dog.g.visible = false; scene.add(dog.g);
+  let dog = makeDog(); dog.g.visible = false; scene.add(dog.g);
+  // The rigged Labrador takes over from the stand-in where it stands as soon as it has loaded.
+  dogModelReady.then(() => {
+    const lab = makeLabrador(); if (!lab) return;
+    lab.g.position.copy(dog.g.position); lab.g.rotation.copy(dog.g.rotation); lab.g.visible = dog.g.visible;
+    scene.remove(dog.g); scene.add(lab.g); dog = lab;
+  });
   const fetchQ = [], FETCH_RANGE = 70, dv = new THREE.Vector3();
   let dogMode = 'sit', dogBird = null, pileN = 0;
   const hunterX = () => camera.position.x;
@@ -721,24 +771,22 @@ export function createGame(canvas, cb) {
       const spot = pileSpot(pileN);
       if (moveDog(spot, dt, 7)) {
         const b = dogBird; b.carried = false; b.retrieved = mine(b); foldWings(b); // a bird lost to another hunter's claim isn't ours to pick up
-        b.g.position.copy(spot).setY(groundH(spot.x, spot.z) + (QUARRY[b.kind] || QUARRY.duck).rest);
-        b.g.rotation.set(0, Math.PI + rnd(-0.1, 0.1), (Q.upturn ? Math.PI : 0) + rnd(-0.3, 0.3)); // laid out like the bag
+        b.g.position.copy(spot);
+        lay(b, groundH(spot.x, spot.z), Math.PI + rnd(-0.1, 0.1), (Q.upturn ? Math.PI : 0) + rnd(-0.3, 0.3)); // laid out like the bag
         pileN++; dogMode = 'home'; dogBird = null;
       }
     } else if (dogMode === 'home') {
       running = true;
       if (moveDog(dogHome(), dt, 6)) { dogMode = 'sit'; dog.g.rotation.y = Math.PI * 0.85; }
     }
+    dog.animate(dt, running, T); // before the bird is placed, so it sits in this frame's jaws
     if (dogBird?.carried) { // held across the jaws
       dog.g.updateMatrixWorld();
       dogBird.g.position.copy(dog.head.localToWorld(dog.mouth.clone()));
-      dogBird.g.rotation.set(0, dog.g.rotation.y + Math.PI / 2, Math.PI / 2);
+      if (dogBird.scan) { // the flat chaffinch scan is gripped round the middle, lying across the jaws
+        dogBird.g.position.y -= 0.05; dogBird.g.rotation.set(0.15, dog.g.rotation.y + Math.PI / 2, 0);
+      } else dogBird.g.rotation.set(0, dog.g.rotation.y + Math.PI / 2, Math.PI / 2);
     }
-    // Gallop while running; sit (haunches down, tail sweeping) at rest.
-    const k = running ? Math.sin(T * 14) : 0;
-    dog.legs.forEach((l, i) => { l.rotation.x = running ? k * (i < 2 ? 0.7 : -0.7) : (i < 2 ? 0 : -1.25); });
-    dog.body.rotation.x = Math.PI / 2 + (running ? 0 : -0.45); dog.body.position.y = running ? 0.5 + Math.abs(k) * 0.04 : 0.4;
-    dog.tail.rotation.y = Math.sin(T * (running ? 8 : 3)) * 0.5;
   }
 
   /* ---------- looking at and holding a retrieved bird ---------- */
@@ -765,7 +813,11 @@ export function createGame(canvas, cb) {
     held = grabTarget; grabTarget = null; aim = false;
     heldFrom = { p: held.g.position.clone(), q: held.g.quaternion.clone() };
     const size = new THREE.Box3().setFromObject(held.g).getSize(new THREE.Vector3()).length();
-    holdGroup.add(held.g); held.g.position.set(0, 0.03, 0); held.g.rotation.set(0.25, Math.PI * 0.6, Math.PI);
+    holdGroup.add(held.g); held.g.position.set(0, 0.03, 0);
+    // The scan is turned to show its upper side to the eye, head to the left; the mallard shows its back (green head,
+    // blue speculum), head to the right; the others are turned breast up.
+    if (held.scan) held.g.quaternion.setFromEuler(SCAN_FACE);
+    else held.g.rotation.set(0.25, Math.PI * 0.6, held.carcass ? Math.PI / 2 : Math.PI);
     holdGroup.position.set(0.02, -0.1 - size * 0.1, -0.35 - size * 0.8); holdGroup.visible = true; hud();
   }
 
@@ -847,7 +899,10 @@ export function createGame(canvas, cb) {
         d.vel.y += ((flap ? 3 : -7) + (d.alt - p.y) * 1.1 - d.vel.y * 0.9) * dt;
         p.addScaledVector(d.vel, dt); g.lookAt(tmp.copy(p).add(d.vel));
         d.ph += dt * 13 * TAU;
-        if (flap) for (const [a, b] of d.wings) { a.position.y = 0; a.scale.z = 1; a.rotation.set(0, 0, 0.15 + 0.85 * Math.sin(d.ph)); b.rotation.set(0, 0, 0.45 * Math.sin(d.ph - 1.1)); }
+        if (d.rig) { // ease the wings shut for a dip and open again, rather than snapping
+          const r = d.rig; r.fold += ((flap ? 0 : 1) - r.fold) * Math.min(1, dt * 16);
+          r.pose(Math.sin(d.ph), r.fold);
+        } else if (flap) for (const [a, b] of d.wings) { a.position.y = 0; a.scale.z = 1; a.rotation.set(0, 0, 0.15 + 0.85 * Math.sin(d.ph)); b.rotation.set(0, 0, 0.45 * Math.sin(d.ph - 1.1)); }
         else foldWings(d);
         gone = Math.hypot(p.x, p.z) > 200;
       } else if (d.alive) {
@@ -862,7 +917,9 @@ export function createGame(canvas, cb) {
         g.rotateX(d.spin * dt); g.rotateZ(d.spin * 0.6 * dt);
         const h = groundH(p.x, p.z) + (QUARRY[d.kind] || QUARRY.duck).rest;
         if (p.y < h) {
-          d.down = true; d.life = 0; p.y = h; g.rotation.set(0, rnd(0, 6), 1.4); audio?.thud(p);
+          d.down = true; d.life = 0; toCarcass(d);
+          if (d.rig) { d.rig.fold = 0.6; d.rig.pose(-0.35, 0.6); } // wings slumped part-closed where it fell
+          lay(d, h - (QUARRY[d.kind] || QUARRY.duck).rest, rnd(0, 6), 1.4); audio?.thud(p);
           if (state === 'play' && killLog.get(d.id) === 'me' && Math.hypot(p.x - hunterX(), p.z) < FETCH_RANGE) { d.fetch = true; fetchQ.push(d); }
         }
       } else gone = d.life > 8 && !d.fetch && !d.retrieved; // the dog's birds stay
@@ -878,6 +935,7 @@ export function createGame(canvas, cb) {
 
     if (!bagView) camera.rotation.set(pitch + kick * 0.03, yaw, 0);
     if (state === 'play') { stepDog(dt); if (!held) findGrab(); }
+    else if (dog.g.visible) dog.animate(dt, false, T); // keeps breathing beside the bag
     gun.visible = state === 'play' && !held;
     // Right mouse shoulders the gun: the eye drops just above the rib and looks down it to the bead.
     // While a double is broken open for reloading it drops off the shoulder.
