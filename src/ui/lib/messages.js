@@ -16,3 +16,10 @@ const SIGN_IN = {
   'auth/operation-not-allowed': () => 'Google sign-in is turned off in Firebase › Authentication › Sign-in method.',
 };
 export const signInErrorText = err => SIGN_IN[err.code]?.() ?? `Sign-in did not complete (${err.code || err.message}).`;
+
+// Night hunt callouts, keys 1–4 (or the CALL buttons): what the lamp and the guns say to each other in the dark.
+export const CALLS = {
+  lamp: ['Bird in the beam!', 'Coming round the tree', 'Take it now!', "It's gone"],
+  gun: ['I see it', 'Hold the light on it', 'Shooting!', "Can't see it — find it again"],
+};
+export const callText = (role, n) => (CALLS[role === 'gun' ? 'gun' : 'lamp'] || CALLS.lamp)[n - 1] || '';

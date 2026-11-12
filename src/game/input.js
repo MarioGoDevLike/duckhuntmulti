@@ -2,7 +2,7 @@
 // (whose buttons are part of the HUD). Translates DOM events into the handlers' verbs and nothing more.
 import { TOUCH } from '../config/platform.js';
 
-// h: { live(), look(dx, dy, sensitivity), fire(), aim(on), reload(), hold(), pause(), lockLost() }
+// h: { live(), look(dx, dy, sensitivity), fire(), aim(on), reload(), hold(), pause(), lockLost(), key?(code) }
 export function createInput(canvas, h) {
   let locked = false;
 
@@ -40,6 +40,7 @@ export function createInput(canvas, h) {
     if (e.code === 'KeyR') h.reload();
     else if (e.code === 'KeyE') h.hold();
     else if (e.code === 'Escape' || e.code === 'KeyP') h.pause(); // Esc also pauses when the mouse isn't captured
+    else h.key?.(e.code); // anything else is the game's to read (the night hunt's lamp, walking and callouts)
   };
   const onMenu = e => e.preventDefault();
   const onLock = () => {

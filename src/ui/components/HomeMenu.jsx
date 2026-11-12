@@ -1,7 +1,7 @@
 // The main menu: a centered window over the live scene listing Hunt / Multiplayer / Leaderboard / Controls / Settings;
 // each opens in the same window.
 import { useState } from 'react';
-import { GAME_TIME, QUARRY } from '../../config/gameplay.js';
+import { QUARRY } from '../../config/gameplay.js';
 import { TOUCH } from '../../config/platform.js';
 import { enabled, logout, MAX_PLAYERS } from '../../net/firebase.js';
 import { clock } from '../lib/format.js';
@@ -105,9 +105,10 @@ function HuntSteps({ pickers, loadout }) {
       <div className="loadout">
         <small>{last ? 'Loadout' : `Step ${step + 1} of ${STEPS.length}`}</small>
         <b>{chosen}</b>
-        {last && <small>{clock(GAME_TIME)} hunt · Best <span>{loadout.best}</span></small>}
+        {last && <small>{clock(loadout.time)} {loadout.test ? 'test night, alone' : 'hunt'} · Best <span>{loadout.best}</span></small>}
+        {last && !loadout.soloOk && <small>Night hunts are for 2–4 hunters: create a room under Multiplayer.</small>}
       </div>
-      {last ? <button className="cta" onClick={loadout.onPlay}>Start hunt</button>
+      {last ? <button className="cta" disabled={!loadout.soloOk} onClick={loadout.onPlay}>{loadout.test ? 'Test the night' : 'Start hunt'}</button>
         : <button className="cta" onClick={() => setStep(step + 1)}>Next ›</button>}
     </div>
   </>;

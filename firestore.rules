@@ -1,0 +1,49 @@
+rules_version = '2';
+// Paste into Firebase console › Firestore › Rules. Mirrors the data layout described in src/net/firebase.js.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function roomPath(code) { return /databases/$(database)/documents/rooms/$(code); }
+    function member(code) { return request.auth.uid in get(roomPath(code)).data.members; }
+    // Untouched for 3 hours: left by closed tabs, so anyone may clear it (src/net/firebase.js, sweepRooms).
+    function stale(r) { return r.get('touchedAt', r.createdAt) < request.time - duration.value(3, 'h'); }
+    // What is under a room may be read and deleted by its members, by anyone once the room is stale,
+    // and by anyone once the room document itself is gone (leftovers of an interrupted clean-up).
+    function clearable(code) { return !exists(roomPath(code)) || member(code) || stale(get(roomPath(code)).data); }
+
+    match /leaderboards/{quarry}/scores/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && quarry in ['duck', 'finch', 'thrush', 'night']
+        && request.resource.data.keys().hasOnly(['name', 'score', 'ducks', 'updatedAt'])
+        && request.resource.data.score is int && request.resource.data.ducks is int;
+    }
+
+    match /rooms/{code} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.members == [request.auth.uid];
+      // Members run the room (rounds, leaving, closing); anyone else may only add themselves to an open room.
+      allow update: if signedIn() && request.resource.data.members.size() <= 4 && (
+        request.auth.uid in resource.data.members
+        || (!resource.data.get('closing', false)
+            && request.resource.data.members.removeAll(resource.data.members) == [request.auth.uid]
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'touchedAt'])));
+      allow delete: if signedIn() && (request.auth.uid in resource.data.members || stale(resource.data));
+
+      match /players/{uid} {
+        allow read: if signedIn();
+        allow create, update: if signedIn() && request.auth.uid == uid && member(code);
+        allow delete: if signedIn() && clearable(code);
+      }
+      // Kills are create-only, so the first hunter to claim a bird gets it.
+      match /rounds/{n}/kills/{bird} {
+        allow read, delete: if signedIn() && clearable(code);
+        allow create: if signedIn() && member(code) && request.resource.data.by == request.auth.uid;
+      }
+      match /rounds/{n}/events/{id} {
+        allow read, delete: if signedIn() && clearable(code);
+        allow create: if signedIn() && member(code) && request.resource.data.by == request.auth.uid;
+      }
+    }
+  }
+}

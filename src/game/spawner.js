@@ -60,14 +60,14 @@ function finches({ R, flock, lag, voice }) {
 // Thrush: one bird at a time out of the woods, fast and direct. Where from depends on the map (config/maps.js).
 function thrush(o) { return o.map === 'pineRidge' ? ridgeThrush(o) : rideThrush(o); }
 
-// Oak Wood Ride: most break from either tree wall 10–40 m ahead and dart across the ride at canopy height, a
-// 1–2 s chance; some come straight down the ride at the line.
+// Oak Wood Ride: most break from the face of either tree wall (just clear of the edge crowns) 10–40 m ahead and dart
+// across the ride at canopy height, a 1–2 s chance; some come straight down the ride at the line.
 function rideThrush({ R, flock, lag, voice }) {
   const rr = (a, b) => a + R() * (b - a);
   const d = makeBird('thrush', true), p = new THREE.Vector3(), v = new THREE.Vector3();
   if (R() < 0.78) {
     const side = R() < 0.5 ? 1 : -1;
-    p.set(side * rr(14, 17), rr(7, 11), -rr(10, 40)); v.set(-side, 0, rr(-0.25, 0.15));
+    p.set(side * rr(10, 12), rr(7, 11), -rr(10, 40)); v.set(-side, 0, rr(-0.25, 0.15));
   } else { p.set(rr(-8, 8), rr(8, 12), -rr(70, 90)); v.set(rr(-0.08, 0.08), 0, 1); }
   d.g.position.copy(p);
   flock.add(d, { vel: v.normalize().multiplyScalar(rr(15, 20)), alive: true, down: false, ph: 0, life: 0, wob: rr(0, 1), alt: rr(7, 12) }, true, lag);

@@ -44,7 +44,7 @@ button.back:hover{color:#f4ead2;border-color:#e2c877}
 .sect{display:flex;align-items:center;gap:12px;margin:4px 0 10px;font:600 12px 'Barlow Condensed',sans-serif;letter-spacing:3px;text-transform:uppercase;color:#c9a95a}
 .sect::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,rgba(201,169,90,.45),transparent)}
 .cards{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:18px}
-.cards.three{grid-template-columns:repeat(3,1fr)}
+.cards.three{grid-template-columns:repeat(3,1fr)}.cards.four{grid-template-columns:repeat(4,1fr)}
 .pick{display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:0 0 10px;text-align:left;letter-spacing:0;color:#efe6cf;
   background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.015));border:1px solid rgba(239,230,207,.13);border-radius:6px;
   overflow:hidden;transition:border-color .15s,transform .15s,background .15s}
@@ -208,3 +208,18 @@ button:hover{background:#ffe08a}
   .ammo i{width:10px;height:28px;margin-right:6px}
   .tc .pause{top:40px}
 }
+
+/* ---------- night hunt ---------- */
+.nightmode .top{color:#d9dcc8}
+.night{position:absolute;left:max(20px,env(safe-area-inset-left));top:56px;font-size:14px;line-height:1.5;max-width:min(520px,60vw)}
+.night .lamp{display:flex;align-items:center;gap:10px;margin-bottom:6px;opacity:.75}
+.night .lamp.on{opacity:1}.night .lamp.on b{color:#ffe7a8}
+.night .lamp b{font:bold 13px Consolas,monospace;letter-spacing:1px}
+.night .bat{display:inline-block;width:70px;height:8px;border:1px solid rgba(241,232,208,.7);border-radius:2px}
+.night .bat i{display:block;height:100%;background:#cfe08a}.night .bat i.low{background:#ff5a3a}
+.night .path{display:flex;gap:16px}.night .path em{color:#ffe07a;font-style:normal}
+.night .keys{margin-top:6px;font-size:12px;opacity:.7}.night kbd{font:11px Consolas,monospace;border:1px solid rgba(241,232,208,.5);border-radius:3px;padding:0 4px}
+.reticle.lampdot{width:10px;height:10px;margin:-5px;border-color:rgba(255,240,200,.35)}.reticle.lampdot::after{display:none}
+.tc .calls{position:absolute;left:50%;transform:translateX(-50%);bottom:max(18px,env(safe-area-inset-bottom));display:flex;gap:6px}
+.tc .calls button{position:static;border-radius:16px;height:32px;padding:0 10px;font-size:10px}
+@media (max-width:760px){.cards.four{grid-template-columns:repeat(2,1fr)}.night{top:44px;font-size:12px}}

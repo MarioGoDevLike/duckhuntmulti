@@ -47,8 +47,12 @@ function standIn(name, flashMat) {
 const makeHunter = (name, flashMat) =>
   ({ ...(model ? figure : standIn)(name, flashMat), name, model: !!model, flT: 0, yaw: 0, pitch: 0, shots: 0 });
 
+// The figures stand in `line`, a group the game moves with the party at night (by day it stays at the origin).
+// A point light flashes at a figure's muzzle as it fires, so a shot in the dark lights the trees for an instant.
 export function createHunters(scene, flashMat) {
-  const peers = new Map(), at = new THREE.Vector3();
+  const peers = new Map(), at = new THREE.Vector3(), line = new THREE.Group(); scene.add(line);
+  const flashLight = new THREE.PointLight(0xffc27a, 0, 30, 2); line.add(flashLight);
+  let gap = 5;
   // Hunters who joined before the model loaded get it now, in the same place and pose.
   modelReady.then(() => {
     if (!model) return;
@@ -57,22 +61,27 @@ export function createHunters(scene, flashMat) {
       const m = makeHunter(h.name, flashMat);
       m.g.position.copy(h.g.position); m.g.rotation.copy(h.g.rotation); m.arms.rotation.x = h.arms.rotation.x;
       Object.assign(m, { yaw: h.yaw, pitch: h.pitch, shots: h.shots, flT: h.flT });
-      scene.remove(h.g); scene.add(m.g); peers.set(id, m);
+      line.remove(h.g); line.add(m.g); peers.set(id, m);
     }
   });
   return {
-    // list: [{ id, name, slot, yaw, pitch, shots }] · count: hunters in the line · onShot(position) for each new shot.
+    line,
+    setGap(g) { gap = g; },
+    // A hunter's eye, in the world, and where they are looking (eased): for the lamp in another hunter's hand.
+    eyeOf(id, out) { const h = peers.get(id); if (!h) return null; out.set(h.g.position.x, EYE, h.g.position.z); line.localToWorld(out); return { yaw: h.g.rotation.y, pitch: h.arms.rotation.x }; },
+    // list: [{ id, name, slot, yaw, pitch, shots }] · count: hunters in the line · onShot(world position) for each new shot.
     sync(list, count, onShot) {
       const seen = new Set();
       for (const p of list) {
         seen.add(p.id);
         let h = peers.get(p.id);
-        if (!h) { h = makeHunter(p.name, flashMat); h.shots = p.shots || 0; h.g.position.set(slotX(p.slot, count), 0, 0); scene.add(h.g); peers.set(p.id, h); }
+        if (!h) { h = makeHunter(p.name, flashMat); h.shots = p.shots || 0; h.g.position.set(slotX(p.slot, count, gap), 0, 0); line.add(h.g); peers.set(p.id, h); }
+        h.g.position.x = slotX(p.slot, count, gap);
         h.yaw = p.yaw || 0; h.pitch = clamp(p.pitch || 0, PITCH_MIN, PITCH_MAX);
-        if ((p.shots || 0) > h.shots) { h.flT = 0.06; onShot(at.copy(h.g.position).setY(EYE)); }
+        if ((p.shots || 0) > h.shots) { h.flT = 0.06; flashLight.position.set(h.g.position.x, EYE, h.g.position.z - 0.8); onShot(line.localToWorld(at.copy(h.g.position).setY(EYE))); }
         h.shots = p.shots || 0;
       }
-      for (const [id, h] of peers) if (!seen.has(id)) { scene.remove(h.g); peers.delete(id); }
+      for (const [id, h] of peers) if (!seen.has(id)) { line.remove(h.g); peers.delete(id); }
     },
     update(dt) { // ease toward the latest pose; poses arrive about twice a second
       for (const h of peers.values()) {
@@ -80,7 +89,9 @@ export function createHunters(scene, flashMat) {
         h.g.rotation.y += (h.yaw - h.g.rotation.y) * k; h.arms.rotation.x += (h.pitch - h.arms.rotation.x) * k;
         h.fl.visible = (h.flT -= dt) > 0;
       }
+      let lit = 0; for (const h of peers.values()) lit = Math.max(lit, h.flT);
+      flashLight.intensity = lit > 0 ? 60 : 0;
     },
-    clear() { peers.forEach(h => scene.remove(h.g)); peers.clear(); },
+    clear() { peers.forEach(h => line.remove(h.g)); peers.clear(); line.position.set(0, 0, 0); line.rotation.set(0, 0, 0); gap = 5; },
   };
 }

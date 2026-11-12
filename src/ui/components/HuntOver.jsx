@@ -8,7 +8,9 @@ export default function HuntOver({ result, verdict, Q, best, netErr, inRoom, onB
     <div className="endbar">
       <div className="endstats">
         <b>HUNT OVER</b>{result.record && <span className="rec">NEW HIGH SCORE</span>}
-        <span>Score <b>{result.score}</b> · {capitalize(Q.many)} <b>{result.ducks}</b> · Accuracy {accuracy}% · Best <b>{best}</b></span>
+        {Q.night
+          ? <span>Party bag <b>{result.ducks}</b> {result.ducks === 1 ? Q.one : Q.many} · <b>{result.score}</b> pts · You dropped <b>{result.kills}</b>{result.shots ? ` with ${result.shots} shots` : ''}{result.lost ? ` · ${result.lost} lost in the dark` : ''}</span>
+          : <span>Score <b>{result.score}</b> · {capitalize(Q.many)} <b>{result.ducks}</b> · Accuracy {accuracy}% · Best <b>{best}</b></span>}
         {netErr && <span className="err">{netErr}</span>}
       </div>
       <div className="endbtns">

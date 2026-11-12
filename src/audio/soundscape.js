@@ -141,6 +141,7 @@ export function createAudio(volume = 1) {
     tone(b, n, 0.5, 62, 30, 0.38);
   };
   const lp = new THREE.Vector3(), lf = new THREE.Vector3();
+  let nightTimer = 0;
 
   return {
     resume: () => ac.resume(),
@@ -202,6 +203,43 @@ export function createAudio(volume = 1) {
       if (rec.thrush) { playCall('thrush', bus({ at, send: 0.2, gain: vol * 1.3 }), n); return; }
       const b = bus({ at, send: 0.2, gain: vol * 0.45 }), f = rnd(7000, 7800);
       tone(b, n, 0.8, f, f * 0.9, 0.05); tone(b, n + 0.004, 0.2, f * 1.5, f * 1.3, 0.035);
+    },
+    /* ---------- the night hunt ---------- */
+    // A thrush's thin "tsip" in the dark as it comes in: always the synthesised call, as the recording is song.
+    alarm(at, vol = 1) {
+      if (ac.state !== 'running') return;
+      const n = ac.currentTime, b = bus({ at, send: 0.2, gain: vol * 0.45 });
+      for (let i = 0, c = Math.random() < 0.4 ? 2 : 1; i < c; i++) {
+        const t = n + i * 0.16, f = rnd(7000, 7900);
+        tone(b, t, 0.8, f, f * 0.9, 0.05); tone(b, t + 0.004, 0.2, f * 1.5, f * 1.3, 0.035);
+      }
+    },
+    click: () => clack(bus({ pan: 0.2, send: 0, gain: 0.5 }), ac.currentTime, 3200, 0.2), // the lamp's switch
+    // The night around the hunters: crickets in the walls and the grass, a scops owl whistling every few seconds,
+    // dogs barking in the village across the valley. night(false) stops it.
+    night(on) {
+      clearInterval(nightTimer); nightTimer = 0;
+      wg.gain.setTargetAtTime(on ? 0.02 : 0.045, ac.currentTime, 0.5);
+      if (!on) return;
+      const crickets = Array.from({ length: 5 }, (_, i) => ({ b: bus({ pan: -0.9 + i * 0.45 + rnd(-0.1, 0.1), send: 0.15, gain: rnd(0.05, 0.11) }), f: rnd(4300, 5300), every: rnd(0.45, 0.8), next: 0 }));
+      const owl = { b: bus({ pan: rnd(-0.7, 0.7), send: 0.6, gain: 0.13 }), next: 0, phase: 0 }, dog = { b: bus({ pan: rnd(-0.5, 0.5), send: 0.9, gain: 0.09, lp: 1500 }), next: ac.currentTime + rnd(8, 20) };
+      nightTimer = setInterval(() => {
+        if (ac.state !== 'running') return;
+        const n = ac.currentTime;
+        for (const c of crickets) if (n >= c.next) { c.next = n + c.every; for (let i = 0; i < 3; i++) tone(c.b, n + 0.05 + i * 0.034, 0.5, c.f, c.f * 0.98, 0.022); }
+        if (n >= owl.next) { // a scops owl: a soft, piping "tyu", on and off through the night
+          owl.phase = (owl.phase + 1) % 40;
+          if (owl.phase < 22) tone(owl.b, n + 0.05, 0.7, 1280, 1180, 0.24);
+          owl.next = n + rnd(2.5, 2.8);
+        }
+        if (n >= dog.next) {
+          for (let i = 0, c = 2 + (Math.random() * 3 | 0); i < c; i++) {
+            const t = n + 0.05 + i * rnd(0.32, 0.45);
+            noise(dog.b, t, 0.7, 'bandpass', 900, 500, 0.13, 2); tone(dog.b, t, 0.4, 420, 280, 0.12, 'sawtooth');
+          }
+          dog.next = n + rnd(18, 45);
+        }
+      }, 100);
     },
     // A real call from the recording, played from where the bird is, pitched a little per bird.
     quack(at, vol = 1) {

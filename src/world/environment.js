@@ -23,7 +23,7 @@ function grassTexture() {
   return t;
 }
 
-// Returns { uTime, mow, growBack, setMap, reachable }. Maps are built the first time they are shown, then kept.
+// Returns { uTime, mow, growBack, setMap, dawn, map, reachable, inWater, drift }. Maps are built the first time they are shown, then kept.
 export function createEnvironment(scene, renderer) {
   const sky = new Sky(); sky.scale.setScalar(5000); scene.add(sky);
   const envScene = new THREE.Scene(), envSky = new THREE.Mesh(sky.geometry, sky.material); envSky.scale.setScalar(5000); envScene.add(envSky); // reflections: the sky alone
@@ -71,20 +71,30 @@ export function createEnvironment(scene, renderer) {
   }
 
   const built = {};
-  let map = null, mowRect = null;
+  let map = null, mowRect = null, lit = -1;
+  const ca = new THREE.Color(), cb = new THREE.Color(), dir = (L, k) => sunDir.setFromSphericalCoords(1, degToRad(L[0]), degToRad(L[1]));
+  // The map's light, or at night that blended k (0 … 1) of the way to its first light (map.dawn).
+  function light(k) {
+    const A = map.light, B = map.dawn || A, mix = (a, b) => a + (b - a) * k;
+    const sky3 = A.sky.map((v, i) => mix(v, B.sky[i])), polar = mix(A.sun[0], B.sun[0]), az = mix(A.sun[1], B.sun[1]);
+    const u = sky.material.uniforms;
+    [u.turbidity.value, u.rayleigh.value, u.mieCoefficient.value, u.mieDirectionalG.value] = sky3;
+    u.sunPosition.value.copy(dir([polar, az]));
+    if (k !== lit && (k === 0 || k === 1 || Math.abs(k - lit) > 0.05)) { // the reflections, redrawn as the sky changes
+      lit = k; scene.environment?.dispose(); scene.environment = pm.fromScene(envScene, 0, 0.1, 6000).texture;
+    }
+    hemi.color.copy(ca.set(A.hemi[0]).lerp(cb.set(B.hemi[0]), k)); hemi.groundColor.copy(ca.set(A.hemi[1]).lerp(cb.set(B.hemi[1]), k)); hemi.intensity = mix(A.hemi[2], B.hemi[2]);
+    sun.color.copy(ca.set(A.sunColor).lerp(cb.set(B.sunColor), k)); sun.intensity = mix(A.sunI, B.sunI);
+    const m0 = A.moon || A.sun, m1 = B.moon || B.sun; sun.position.copy(dir([mix(m0[0], m1[0]), mix(m0[1], m1[1])])).multiplyScalar(100); // at night, the moon
+    scene.fog.color.copy(ca.set(A.fog[0]).lerp(cb.set(B.fog[0]), k)); scene.fog.density = mix(A.fog[1], B.fog[1]);
+    renderer.toneMappingExposure = mix(A.exposure ?? 0.55, B.exposure ?? 0.55);
+    map.fade?.(k);
+  }
   function setMap(id) {
     map = built[id] ||= (() => { const b = BUILD[id](tex); b.group.visible = false; scene.add(b.group); return b; })();
     for (const k in built) built[k].group.visible = built[k] === map;
     setTerrain(map.height, map.water);
-    const L = map.light;
-    sunDir.setFromSphericalCoords(1, degToRad(L.sun[0]), degToRad(L.sun[1]));
-    const u = sky.material.uniforms;
-    [u.turbidity.value, u.rayleigh.value, u.mieCoefficient.value, u.mieDirectionalG.value] = L.sky;
-    u.sunPosition.value.copy(sunDir);
-    scene.environment?.dispose(); scene.environment = pm.fromScene(envScene, 0, 0.1, 6000).texture;
-    hemi.color.set(L.hemi[0]); hemi.groundColor.set(L.hemi[1]); hemi.intensity = L.hemi[2];
-    sun.color.set(L.sunColor); sun.intensity = L.sunI; sun.position.copy(sunDir).multiplyScalar(100);
-    scene.fog.color.set(L.fog[0]); scene.fog.density = L.fog[1];
+    lit = -1; light(0);
     grassMat.color.set(map.grassTint ?? 0xffffff);
     applyMow(mowRect);
   }
@@ -96,6 +106,8 @@ export function createEnvironment(scene, renderer) {
     mow(rect) { mowRect = rect; applyMow(rect); mown = true; },
     growBack() { if (mown) { mowRect = null; applyMow(null); mown = false; } },
     setMap,
+    dawn: k => light(Math.min(1, Math.max(0, k))), // night maps: how far toward first light
+    get map() { return map; },
     reachable: p => map.reachable(p), // a bird down here can be fetched (not lost in the trees or the valley)
     inWater: p => inWater(p.x, p.z),
     // A bird down on the water drifts in to the bank in front of the line. True once it is ashore.

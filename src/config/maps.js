@@ -5,6 +5,7 @@ export const MAPS = {
   oakRide: { quarry: 'thrush', name: 'Oak Wood Ride', line: 'Snap shots across a ride in the woods' },
   pineRidge: { quarry: 'thrush', name: 'Pine Ridge Pass', line: 'Birds climbing out of the valley' },
   clearing: { quarry: 'finch', name: 'Stubble Clearing', line: 'Flocks over open stubble' },
+  field: { quarry: 'night', name: 'Projector Field', line: 'A lone olive in an open field, projectors lighting the sky' },
 };
 export const MENU_MAP = 'lake'; // the view behind the menus
 

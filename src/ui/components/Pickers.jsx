@@ -16,7 +16,7 @@ const gunRatings = w => ({
 // portraits: { [kind]: image URL } rendered from the 3D models.
 export function QuarryPicker({ value, onPick, portraits }) {
   return (
-    <div className="cards three" role="radiogroup" aria-label="Quarry">
+    <div className="cards four" role="radiogroup" aria-label="Quarry">
       {Object.entries(QUARRY).map(([k, q]) => (
         <button key={k} role="radio" aria-checked={k === value} className={k === value ? 'pick on' : 'pick'} onClick={() => onPick(k)}>
           <span className="pic bird">{portraits[k] && <img src={portraits[k]} alt="" />}<em>×{q.pts}</em></span>
