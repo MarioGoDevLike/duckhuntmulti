@@ -35,11 +35,16 @@ It adds to the room data (see `src/net/firebase.js`): a `role` on each player, `
 and `rooms/{code}/rounds/{n}/events/{id}` — shots that frighten the birds, birds the lamp has found, and the callouts
 (all covered by `firestore.rules`).
 
-The guns aim by the lamper's beam, so poses at night travel ten times a second over the **Realtime Database**
-(`live/{code}/{uid}`), which Firestore is not made for. To turn it on: Firebase console › Build › Realtime Database ›
-Create database; copy its URL into `.env` (and the host's environment variables) as `VITE_FIREBASE_DATABASE_URL`;
-and paste `database.rules.json` into its Rules tab. Without it the night still plays, with poses going through
-Firestore twice a second, so the beam on the guns' screens lags behind the lamper's.
+The guns aim by the lamper's beam, so poses at night travel ten times a second over the live channel (below).
+
+### The live channel (Realtime Database)
+
+Where every hunter in a room is looking, and the lamp at night, travel over the **Realtime Database**
+(`live/{code}/{uid}`): twice a second by day, ten times at night. It charges by data rather than by write, so it costs
+nothing on the free plan, where the same traffic through Firestore uses up its daily write and read quota within a
+few hunts. To turn it on: Firebase console › Build › Realtime Database › Create database; copy its URL into `.env`
+(and the host's environment variables) as `VITE_FIREBASE_DATABASE_URL`; and paste `database.rules.json` into its
+Rules tab. Without it rooms still play, with poses going through Firestore twice a second.
 
 ## Layout
 

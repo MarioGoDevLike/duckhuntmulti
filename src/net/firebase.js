@@ -7,14 +7,15 @@ import {
   getDocsFromServer as getDocs, serverTimestamp, runTransaction, onSnapshot, arrayUnion, arrayRemove, Timestamp,
   where, writeBatch, deleteDoc,
 } from 'firebase/firestore';
-// The Realtime Database carries only the live channel (poses and the lamp, ~10 a second), which Firestore is not made for.
+// The Realtime Database carries only the live channel (every hunter's aim and the lamp, 2–10 a second): it charges by data,
+// where Firestore charges by write, and three hunters writing their aim into Firestore spent its daily quota in no time.
 import { getDatabase, ref, set, onValue, onDisconnect, remove } from 'firebase/database';
 
 const e = import.meta.env;
 // Without credentials in .env the game still runs; sign-in, rooms and the leaderboard are simply hidden.
 export const enabled = !!e.VITE_FIREBASE_API_KEY;
 
-// The live channel needs the Realtime Database's URL too; without it, night poses go through Firestore (slower).
+// The live channel needs the Realtime Database's URL too; without it, poses go through Firestore (slower, and quota-hungry).
 export const liveEnabled = enabled && !!e.VITE_FIREBASE_DATABASE_URL;
 
 let auth, db, rtdb;
@@ -62,7 +63,7 @@ export async function topScores(quarry, n = 10) {
    rooms/{code}/players/{uid}           { name, weapon, role ('gun'|'lamp', night), score, ducks, round, yaw, pitch, shots, lamp?, joinedAt }
    rooms/{code}/rounds/{n}/kills/{duck} { by }  create-only, so the first hunter to claim a bird gets it
    rooms/{code}/rounds/{n}/events/{id}  { t, by, … }  night: what the lamper's screen decided (game/night.js), and callouts
-   Realtime Database: live/{code}/{uid}  { yaw, pitch, shots, lamp?, round }  night poses, ~10 a second */
+   Realtime Database: live/{code}/{uid}  { yaw, pitch, shots, lamp?, round }  poses, 2 a second (10 at night) */
 export const MAX_PLAYERS = 4;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const roomRef = code => doc(db, 'rooms', code);
