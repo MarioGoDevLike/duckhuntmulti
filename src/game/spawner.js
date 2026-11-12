@@ -7,7 +7,7 @@ import { makeBird } from '../entities/birds/bird.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-// o: { Q, R, flock, lag, facing (yaw most flights favour), voice (soundscape, or null for silent) }.
+// o: { Q, map, R, flock, lag, facing (yaw most flights favour), voice (soundscape, or null for silent) }.
 export function spawnFlight(o) {
   if (o.Q.kind === 'finch') return finches(o);
   if (o.Q.kind === 'thrush') return thrush(o);
@@ -57,13 +57,30 @@ function finches({ R, flock, lag, voice }) {
   voice?.chirp(d.g.position, 1);
 }
 
-// Thrush: one bird at a time breaks out of the grove canopy, climbs and comes at the line fast, passing
-// left, right or overhead.
-function thrush({ R, flock, lag, voice }) {
+// Thrush: one bird at a time out of the woods, fast and direct. Where from depends on the map (config/maps.js).
+function thrush(o) { return o.map === 'pineRidge' ? ridgeThrush(o) : rideThrush(o); }
+
+// Oak Wood Ride: most break from either tree wall 10–40 m ahead and dart across the ride at canopy height, a
+// 1–2 s chance; some come straight down the ride at the line.
+function rideThrush({ R, flock, lag, voice }) {
   const rr = (a, b) => a + R() * (b - a);
-  const d = makeBird('thrush', true), p = new THREE.Vector3(rr(-38, 38), rr(3.2, 5.8), rr(-41, -35));
-  const v = new THREE.Vector3(rr(-14, 14) - p.x * 0.3, 0, 40).normalize();
+  const d = makeBird('thrush', true), p = new THREE.Vector3(), v = new THREE.Vector3();
+  if (R() < 0.78) {
+    const side = R() < 0.5 ? 1 : -1;
+    p.set(side * rr(14, 17), rr(7, 11), -rr(10, 40)); v.set(-side, 0, rr(-0.25, 0.15));
+  } else { p.set(rr(-8, 8), rr(8, 12), -rr(70, 90)); v.set(rr(-0.08, 0.08), 0, 1); }
   d.g.position.copy(p);
-  flock.add(d, { vel: v.multiplyScalar(rr(16, 21)), alive: true, down: false, ph: 0, life: 0, wob: rr(0, 1), alt: rr(6, 13) }, true, lag);
+  flock.add(d, { vel: v.normalize().multiplyScalar(rr(15, 20)), alive: true, down: false, ph: 0, life: 0, wob: rr(0, 1), alt: rr(7, 12) }, true, lag);
+  voice?.tsip(p);
+}
+
+// Pine Ridge Pass: rises out of the valley canopy 65–85 m ahead and climbs toward the saddle, higher and faster,
+// passing left, right or overhead.
+function ridgeThrush({ R, flock, lag, voice }) {
+  const rr = (a, b) => a + R() * (b - a);
+  const d = makeBird('thrush', true), p = new THREE.Vector3(rr(-50, 50), rr(-10, -5), -rr(65, 85)); // just over the valley canopy
+  const v = new THREE.Vector3(rr(-12, 12) - p.x * 0.3, 0, 75).normalize();
+  d.g.position.copy(p);
+  flock.add(d, { vel: v.multiplyScalar(rr(18, 23)), alive: true, down: false, ph: 0, life: 0, wob: rr(0, 1), alt: rr(8, 18) }, true, lag);
   voice?.tsip(p);
 }

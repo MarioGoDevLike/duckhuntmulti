@@ -10,16 +10,18 @@ export const WEAPONS = {
 };
 
 // What is being hunted. hitR/reach/fade: how big the bird is to the shot column and how fast the pattern thins
-// with range; pts: score multiplier; rest: how high a procedural bird sits when down; open/grove: the scenery;
+// with range; pts: score multiplier; rest: how high a procedural bird sits when down;
 // upturn: laid breast up in the bag; gap: seconds between flights; bag: how the birds are laid out on the grass.
 export const QUARRY = {
-  duck: { kind: 'duck', name: 'Mallard', line: 'Steady flights over the marsh', speed: 3, skill: 2, desc: 'Marsh ducks · steady, straight flight · longer shots', one: 'duck', many: 'ducks',
-          hitR: 0.26, reach: 64, fade: 24, pts: 1, rest: 0.12, open: false, grove: false, upturn: false, gap: [1.6, 3.6], bag: { cols: 6, dx: 0.78, dz: 0.9, front: -2.4 } }, // dx: a duck on its side is ~0.7 across
+  duck: { kind: 'duck', name: 'Mallard', line: 'Steady flights over the lake', speed: 3, skill: 2, desc: 'Marsh ducks · steady, straight flight · longer shots', one: 'duck', many: 'ducks',
+          hitR: 0.26, reach: 64, fade: 24, pts: 1, rest: 0.12, upturn: false, gap: [1.6, 3.6], bag: { cols: 6, dx: 0.78, dz: 0.9, front: -2.4 } }, // dx: a duck on its side is ~0.7 across
   finch: { kind: 'finch', name: 'Fringello', line: 'Bounding flocks over open ground', speed: 3, skill: 5, desc: 'Chaffinch flocks · bounding, jinking flight · short, quick shots', one: 'bird', many: 'birds',
-           hitR: 0.15, reach: 46, fade: 16, pts: 1.6, rest: 0.05, open: true, grove: false, upturn: true, gap: [6, 9], bag: { cols: 8, dx: 0.24, dz: 0.42, front: -1.8 } },
-  thrush: { kind: 'thrush', name: 'Thrush', line: 'Bursts from the trees, one by one', speed: 5, skill: 4, desc: 'Summan · bursts out of the trees one at a time · fast, direct flight', one: 'thrush', many: 'thrushes',
-            hitR: 0.19, reach: 52, fade: 18, pts: 1.3, rest: 0.06, open: false, grove: true, upturn: true, gap: [1.4, 3.2], bag: { cols: 6, dx: 0.32, dz: 0.55, front: -2.0 } },
+           hitR: 0.15, reach: 46, fade: 16, pts: 1.6, rest: 0.05, upturn: true, gap: [6, 9], bag: { cols: 8, dx: 0.24, dz: 0.42, front: -1.8 } },
+  thrush: { kind: 'thrush', name: 'Thrush', line: 'Bursts from the woods, one by one', speed: 5, skill: 4, desc: 'Summan · bursts out of the trees one at a time · fast, direct flight', one: 'thrush', many: 'thrushes',
+            hitR: 0.19, reach: 52, fade: 18, pts: 1.3, rest: 0.06, upturn: true, gap: [1.4, 3.2], bag: { cols: 6, dx: 0.32, dz: 0.55, front: -2.0 } },
 };
+// Player settings (menu Settings tab) and their defaults: volume 0–1, look sensitivity ×, field of view in degrees.
+export const SETTINGS = { volume: 0.8, sensitivity: 1, fov: 55 };
 export const quarryOf = kind => QUARRY[kind] || QUARRY.duck;
 
 // Hunter and shot.

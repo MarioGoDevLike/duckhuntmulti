@@ -5,6 +5,7 @@
 // States: 'menu' (drifting view, ambient birds) → 'play' (a hunt, solo or in a room) → 'over' (the bag) → 'menu'.
 import * as THREE from 'three';
 import { GAME_TIME, WEAPONS, QUARRY, EYE, PITCH_MIN, PITCH_MAX, slotX } from '../config/gameplay.js';
+import { MENU_MAP, mapOf } from '../config/maps.js';
 import { TOUCH } from '../config/platform.js';
 import { rnd, mulberry } from '../core/math.js';
 import { createAudio } from '../audio/soundscape.js';
@@ -34,9 +35,10 @@ export function createGame(canvas, cb) {
   /* ---------- state ---------- */
   let audio = null, raf = 0, last = performance.now(), T = 0, state = 'menu', paused = false;
   // View and gun handling. ads: 0 hip … 1 shouldered · brk: 0 … 1 over-under broken open.
+  const settings = { volume: 1, sensitivity: 1, fov: 55 }; // see App's Settings tab
   let yaw = 0, pitch = 0.16, kick = 0, aim = false, ads = 0, brk = 0, menuSpawnT = 1;
   // The round. mp: { seed, startAt (local ms), slot, count } while hunting in a room; R drives the flights, seeded in a room.
-  let W = WEAPONS.semi, Q = QUARRY.duck, mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, poseT = 0;
+  let W = WEAPONS.semi, Q = QUARRY.duck, map = MENU_MAP, mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, poseT = 0;
   let timeLeft = GAME_TIME, score = 0, bagged = 0, shots = 0, shells = W.mag, reloading = false, reloadT = 0, nextShot = 0, lastKill = -9, lastSec = 0;
   const killLog = new Map(); // bird id → 'me' or the id of the hunter who bagged it
   const rr = (a, b) => a + R() * (b - a);
@@ -62,7 +64,7 @@ export function createGame(canvas, cb) {
   });
 
   /* ---------- rules ---------- */
-  const spawn = (lag = 0) => spawnFlight({ Q, R, flock, lag, facing: mp ? 0 : yaw, voice: state === 'play' ? audio : null });
+  const spawn = (lag = 0) => spawnFlight({ Q, map, R, flock, lag, facing: mp ? 0 : yaw, voice: state === 'play' ? audio : null });
 
   // hit: how the shot took it (see shotColumn), or null for a bird another hunter dropped. Returns how it comes down.
   function drop(d, hit = null) {
@@ -140,6 +142,9 @@ export function createGame(canvas, cb) {
     if ((menuSpawnT -= dt) <= 0) { spawn(); menuSpawnT = rnd(2.5, 5); }
   }
 
+  const maybeFetch = d => {
+    if (state === 'play' && killLog.get(d.id) === 'me' && retriever.inReach(d.g.position) && world.reachable(d.g.position)) retriever.fetch(d);
+  };
   function stepBirds(dt) {
     const voice = state === 'play' ? audio : null;
     for (let i = flock.birds.length - 1; i >= 0; i--) {
@@ -149,8 +154,10 @@ export function createGame(canvas, cb) {
       else if (!d.down) {
         if (fall(d, dt)) {
           audio?.thud(d.g.position);
-          if (state === 'play' && killLog.get(d.id) === 'me' && retriever.inReach(d.g.position)) retriever.fetch(d);
+          if (world.inWater(d.g.position)) d.afloat = true; else maybeFetch(d);
         }
+      } else if (d.afloat) {
+        if (world.drift(d.g.position, dt)) { d.afloat = false; d.life = 0; maybeFetch(d); } // ashore: the dog can reach it
       } else gone = d.life > 8 && !d.fetch && !d.retrieved; // the dog's birds stay
       if (gone) flock.remove(i);
     }
@@ -173,7 +180,7 @@ export function createGame(canvas, cb) {
     const open = !W.single && reloading && state === 'play' ? 1 : 0;
     brk += (open - brk) * Math.min(1, dt * (open > brk ? 9 : 16));
     ads += ((aim && state === 'play' && !reloading && brk < 0.5 ? 1 : 0) - ads) * Math.min(1, dt * 12);
-    const fov = 55 - 15 * ads;
+    const fov = settings.fov * (1 - 0.27 * ads); // shouldering zooms in a little
     if (Math.abs(camera.fov - fov) > 0.01) { camera.fov = fov; camera.updateProjectionMatrix(); }
     // How far the current reload step has got (one shell for the semi, both barrels for the double), for the animation.
     const reload = reloading && state === 'play' ? { p: Math.min(1, reloadT / W.reload), shells, mag: W.mag } : null;
@@ -197,7 +204,7 @@ export function createGame(canvas, cb) {
     live,
     look(dx, dy, s) { // full 360° turn; slower while aiming
       if (!live()) return;
-      const k = s * camera.fov / 55;
+      const k = s * settings.sensitivity * camera.fov / settings.fov;
       yaw -= dx * k; pitch = clamp(pitch - dy * k, PITCH_MIN, PITCH_MAX);
     },
     fire, aim: setAim, reload: wantReload, hold: toggleHold, pause,
@@ -209,11 +216,12 @@ export function createGame(canvas, cb) {
 
   /* ---------- public API ---------- */
   return {
-    // room (optional): { seed, startAt: local ms when the round begins, slot, count, quarry }. A room's quarry wins.
-    start(weapon, room, quarry) {
+    // room (optional): { seed, startAt: local ms when the round begins, slot, count, quarry, map }. A room's quarry and map win.
+    start(weapon, room, quarry, mapId) {
       inspector.release();
-      Q = QUARRY[room?.quarry || quarry] || QUARRY.duck; world.setScenery(Q);
-      audio ||= createAudio(); audio.resume();
+      Q = QUARRY[room?.quarry || quarry] || QUARRY.duck;
+      map = mapOf(room ? room.map : mapId, Q.kind); world.setMap(map);
+      audio ||= createAudio(settings.volume); audio.resume();
       W = WEAPONS[weapon] || WEAPONS.semi; view.equip(W); brk = 0;
       flock.reset(); shotColumn.clear(); hunters.clear(); bag.clear(); killLog.clear();
       mp = room || null; R = mp ? mulberry(mp.seed) : Math.random;
@@ -229,12 +237,30 @@ export function createGame(canvas, cb) {
       inspector.release(); retriever.show(false);
       state = 'menu'; paused = false; aim = false; reloading = false; input.release();
       mp = null; R = Math.random; camera.position.set(0, EYE, 0);
-      hunters.clear(); bag.clear(); world.growBack(); world.resetScenery();
+      hunters.clear(); bag.clear(); world.growBack(); map = MENU_MAP; world.setMap(map);
       flock.clear(); shotColumn.clear();
     },
     // After the round: list is [{ by, name, sub, slot, count, winner }] per hunter. See bag.js.
     showBag: list => { if (state === 'over') layBag(list); },
-    unlockAudio() { audio ||= createAudio(); audio.resume(); }, // call from a click so a room's start has sound
+    unlockAudio() { audio ||= createAudio(settings.volume); audio.resume(); },
+    // A small picture of each map from where the hunter stands: { [id]: JPEG data URL }. Builds any map not yet
+    // built, so call it while a loading screen is up. Drawn from the canvas in the same task as the render.
+    mapPreviews(ids, w = 320, h = 180) {
+      const el = renderer.domElement, cam = new THREE.PerspectiveCamera(62, el.width / el.height, 0.05, 6000);
+      cam.position.set(0, EYE, 0); cam.rotation.set(0.1, 0, 0, 'YXZ');
+      const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+      const sh = Math.min(el.height, el.width * h / w), sw = sh * w / h, out = {};
+      flock.birds.forEach(d => { d.g.visible = false; });
+      for (const id of ids) {
+        world.setMap(id); renderer.render(scene, cam);
+        g.drawImage(el, (el.width - sw) / 2, (el.height - sh) / 2, sw, sh, 0, 0, w, h); out[id] = c.toDataURL('image/jpeg', 0.82);
+      }
+      flock.birds.forEach(d => { d.g.visible = true; });
+      world.setMap(map);
+      return out;
+    },
+    // s: { volume 0–1, sensitivity (×), fov (degrees) }, any subset.
+    setSettings(s) { Object.assign(settings, s); audio?.setVolume(settings.volume); }, // call from a click so a room's start has sound
     // Another hunter (by) claimed this bird first: it falls here too and goes in their bag.
     remoteKill(id, by) { killLog.set(id, by); const d = flock.birds.find(x => x.id === id && x.alive); if (d) drop(d); },
     // Our claim lost the race: take the points back.

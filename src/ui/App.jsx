@@ -6,6 +6,7 @@ import { createGame } from '../game/createGame.js';
 import { birdPortraits } from '../entities/birds/portraits.js';
 import { birdModelsReady } from '../entities/birds/models.js';
 import { gunPortraits, gunModelsReady } from '../entities/weapons/portraits.js';
+import { dogModelReady } from '../entities/retriever/labrador.js';
 import {
   watchUser, login, MAX_PLAYERS, roundOver,
   createRoom, joinRoom, leaveRoom, startRound, watchRoom, watchPlayers, watchKills, claimKill, updatePlayer,
@@ -14,7 +15,9 @@ import { KEYS, bestKey, store, read } from './lib/storage.js';
 import { roomErrorText, signInErrorText } from './lib/messages.js';
 import { useLeaderboard } from './hooks/useLeaderboard.js';
 import { usePortrait } from './hooks/useDevice.js';
-import { QuarryPicker, GunPicker } from './components/Pickers.jsx';
+import { QuarryPicker, GunPicker, MapPicker } from './components/Pickers.jsx';
+import { MAPS, mapOf } from '../config/maps.js';
+import { SETTINGS } from '../config/gameplay.js';
 import Hud from './components/Hud.jsx';
 import PauseMenu from './components/PauseMenu.jsx';
 import HomeMenu from './components/HomeMenu.jsx';
@@ -27,9 +30,17 @@ const saved = (key, table, fallback) => (table[read(key)] ? read(key) : fallback
 export default function App() {
   const canvas = useRef(), game = useRef();
   const [phase, setPhase] = useState('home'); // home | lobby | play | paused | over
-  const [tab, setTab] = useState('hunt');     // home menu: hunt | friends | board | controls
+  const [tab, setTab] = useState(null);       // home menu: null (the list) | hunt | friends | board | controls | settings
   const [weapon, setWeapon] = useState(() => saved(KEYS.weapon, WEAPONS, 'semi'));
   const [quarry, setQuarry] = useState(() => saved(KEYS.quarry, QUARRY, 'duck'));
+  const [maps, setMaps] = useState(() => { try { return JSON.parse(read(KEYS.maps)) || {}; } catch { return {}; } }); // quarry → chosen map
+  const map = mapOf(maps[quarry], quarry);
+  const [mapPics, setMapPics] = useState({}); // small views of each map, rendered behind the boot loader
+  const [settings, setSettings] = useState(() => {
+    try { return { ...SETTINGS, ...JSON.parse(read(KEYS.settings)) }; } catch { return SETTINGS; }
+  });
+  const changeSetting = (k, v) => setSettings(s => { const next = { ...s, [k]: v }; store(KEYS.settings, JSON.stringify(next)); return next; });
+  useEffect(() => { game.current?.setSettings(settings); }, [settings]);
   const [hud, setHud] = useState({ score: 0, ducks: 0, shells: 5, mag: 5, reloading: false, time: GAME_TIME });
   const [msg, setMsg] = useState({ id: 0, text: '' });
   const [result, setResult] = useState(null);
@@ -44,6 +55,19 @@ export default function App() {
   // The shotguns likewise: the procedural guns at first, the loaded models once they arrive.
   const [gunPics, setGunPics] = useState(() => gunPortraits());
   useEffect(() => { let live = true; gunModelsReady.then(m => live && setGunPics(gunPortraits(m))); return () => { live = false; }; }, []);
+  // Hold the boot loader (index.html) until the real models and fonts are in, so the menu never shows its
+  // placeholder pictures first. Registered after the portrait effects, so those have re-rendered by then.
+  useEffect(() => {
+    const boot = document.getElementById('boot'); if (!boot) return;
+    const jobs = [birdModelsReady, gunModelsReady, dogModelReady, document.fonts?.ready].filter(Boolean), bar = boot.querySelector('i');
+    let done = 0;
+    jobs.forEach(p => p.catch(() => {}).finally(() => { bar.style.width = `${++done / jobs.length * 100}%`; }));
+    const timeout = new Promise(r => setTimeout(r, 20000)); // a slow or failed download never locks the player out
+    Promise.race([Promise.allSettled(jobs), timeout]).then(() => requestAnimationFrame(() => requestAnimationFrame(() => {
+      try { setMapPics(game.current.mapPreviews(Object.keys(MAPS))); } catch (e) { console.error(e); } // behind the loader: builds every map once
+      boot.classList.add('gone'); setTimeout(() => boot.remove(), 600);
+    })));
+  }, []);
 
   // Account and leaderboard.
   const [user, setUser] = useState(null);
@@ -95,6 +119,7 @@ export default function App() {
         updatePlayer(n.code, n.uid, { yaw: +yaw.toFixed(3), pitch: +pitch.toFixed(3), shots });
       },
     });
+    game.current.setSettings(settings);
     return () => game.current.dispose();
   }, []);
 
@@ -110,14 +135,14 @@ export default function App() {
   useEffect(() => {
     if (!room || !roomData || !user) return;
     const n = net.current;
-    if (roomData.members.length >= MAX_PLAYERS && roomData.round === 0) startRound(room.code, room.offset, GAME_TIME, quarry, true).catch(console.error);
+    if (roomData.members.length >= MAX_PLAYERS && roomData.round === 0) startRound(room.code, room.offset, GAME_TIME, quarry, map, true).catch(console.error);
     if (roomData.status !== 'play' || roomData.round <= n.round || !roomData.slots.includes(user.uid)) return;
     const startAt = roomData.startAt.toMillis() - room.offset; // server time → this machine's clock
     if (startAt + GAME_TIME * 1000 <= Date.now()) return;     // that round already finished
     Object.assign(n, { round: roomData.round, playing: true, pose: null, code: room.code, uid: user.uid });
     updatePlayer(room.code, user.uid, { score: 0, ducks: 0, shots: 0, round: n.round, weapon });
     setMsg({ id: 0, text: '' });
-    game.current.start(weapon, { seed: roomData.seed, startAt, slot: roomData.slots.indexOf(user.uid), count: roomData.slots.length, quarry: roomData.quarry || 'duck' });
+    game.current.start(weapon, { seed: roomData.seed, startAt, slot: roomData.slots.indexOf(user.uid), count: roomData.slots.length, quarry: roomData.quarry || 'duck', map: roomData.map });
     setLiveRound(n.round); setPhase('play');
   }, [roomData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -147,7 +172,7 @@ export default function App() {
   };
   const create = () => enterRoom(createRoom(user, weapon));
   const join = () => joinCode.trim() && enterRoom(joinRoom(joinCode, user, weapon));
-  const startHunt = () => { game.current.unlockAudio(); startRound(room.code, room.offset, GAME_TIME, quarry).catch(err => setRoomErr(roomErrorText(err))); };
+  const startHunt = () => { game.current.unlockAudio(); startRound(room.code, room.offset, GAME_TIME, quarry, map).catch(err => setRoomErr(roomErrorText(err))); };
   const leave = () => {
     if (room && user) leaveRoom(room.code, user.uid).catch(console.error);
     game.current.quit();
@@ -157,14 +182,16 @@ export default function App() {
   /* ---------- solo ---------- */
   const pickWeapon = k => { setWeapon(k); store(KEYS.weapon, k); if (room && user) updatePlayer(room.code, user.uid, { weapon: k }); };
   const pickQuarry = k => { setQuarry(k); store(KEYS.quarry, k); setBoardQuarry(k); };
-  const play = () => { setMsg({ id: 0, text: '' }); game.current.start(weapon, undefined, quarry); setPhase('play'); };
+  const pickMap = k => setMaps(m => { const next = { ...m, [quarry]: k }; store(KEYS.maps, JSON.stringify(next)); return next; });
+  const play = () => { setMsg({ id: 0, text: '' }); game.current.start(weapon, undefined, quarry, map); setPhase('play'); };
   const resume = () => { game.current.resume(); setPhase('play'); };
   const home = () => { game.current.quit(); setPhase('home'); };
   const inRoom = !!room;
 
   // What this hunt is after: our pick solo, the room's pick in a room round.
   const Q = QUARRY[inRoom && (phase === 'play' || phase === 'paused' || phase === 'over') ? roomData?.quarry || 'duck' : quarry];
-  const quarryPicker = <QuarryPicker value={quarry} onPick={pickQuarry} portraits={portraits} />;
+  const quarryPicker = <><QuarryPicker value={quarry} onPick={pickQuarry} portraits={portraits} /><MapPicker quarry={quarry} value={map} onPick={pickMap} /></>;
+  const mapPicker = <MapPicker quarry={quarry} value={map} onPick={pickMap} pictures={mapPics} always />;
   const gunPicker = <GunPicker value={weapon} onPick={pickWeapon} pictures={gunPics} />;
 
   // Players of a round, best first. Our own live score comes from the HUD, the others' from Firestore.
@@ -206,11 +233,11 @@ export default function App() {
       {phase === 'paused' && <PauseMenu inRoom={inRoom} hud={hud} onResume={resume} onRestart={play} onHome={home} onLeave={leave} />}
       {phase === 'home' && (
         <HomeMenu
-          tab={tab} onTab={setTab}
+          tab={tab} onTab={setTab} settings={settings} onSetting={changeSetting}
           account={{ user, signIn, netErr, board: { ...board, quarry: boardQuarry, onQuarry: setBoardQuarry } }}
-          loadout={{ quarryName: QUARRY[quarry].name, weaponName: WEAPONS[weapon].name, best: bests[quarry], onPlay: play }}
+          loadout={{ quarryName: QUARRY[quarry].name, mapName: MAPS[map].name, weaponName: WEAPONS[weapon].name, best: bests[quarry], onPlay: play }}
           rooms={{ busy, joinCode, setJoinCode, create, join, error: roomErr }}
-          quarryPicker={quarryPicker} gunPicker={gunPicker}
+          quarryPicker={<QuarryPicker value={quarry} onPick={pickQuarry} portraits={portraits} />} mapPicker={mapPicker} gunPicker={gunPicker}
         />
       )}
       {phase === 'lobby' && (

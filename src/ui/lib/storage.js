@@ -1,5 +1,5 @@
 // Per-browser preferences. The keys keep the game's original name so existing high scores and choices carry over.
-export const KEYS = { best: 'marshDawnHighscore', weapon: 'marshDawnWeapon', quarry: 'marshDawnQuarry' };
+export const KEYS = { best: 'marshDawnHighscore', weapon: 'marshDawnWeapon', quarry: 'marshDawnQuarry', maps: 'marshDawnMaps', settings: 'marshDawnSettings' }; // maps: JSON { quarry: map id }
 // Each quarry keeps its own best. Ducks keep the original key: the game hunted only ducks when it was written.
 export const bestKey = quarry => (quarry === 'duck' ? KEYS.best : `${KEYS.best}:${quarry}`);
 

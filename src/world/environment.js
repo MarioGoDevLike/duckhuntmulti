@@ -1,10 +1,12 @@
-// The static world: sky and light, the field, wind-blown grass around the hunter, distant trees and the
-// thrush grove. Built once; only the scenery toggles and the grass mowing change it afterwards.
+// The world round the hunter: sky and light, wind-blown grass, and the map being hunted (world/maps.js).
+// Switching map swaps the scenery, terrain and light; the grass is mown short where the dog lays the birds.
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { TOUCH } from '../config/platform.js';
 import { rnd, TAU } from '../core/math.js';
-import { groundH } from './terrain.js';
+import { MENU_MAP } from '../config/maps.js';
+import { BUILD } from './maps.js';
+import { floorH, inWater, setTerrain } from './terrain.js';
 
 const { degToRad } = THREE.MathUtils;
 
@@ -21,34 +23,19 @@ function grassTexture() {
   return t;
 }
 
-// Returns { uTime, mow, growBack, setScenery, resetScenery }.
+// Returns { uTime, mow, growBack, setMap, reachable }. Maps are built the first time they are shown, then kept.
 export function createEnvironment(scene, renderer) {
-  // Low morning sun to the hunter's right.
   const sky = new Sky(); sky.scale.setScalar(5000); scene.add(sky);
-  const sunDir = new THREE.Vector3().setFromSphericalCoords(1, degToRad(82), degToRad(110));
-  Object.entries({ turbidity: 8, rayleigh: 2.2, mieCoefficient: 0.006, mieDirectionalG: 0.85 }).forEach(([k, v]) => { sky.material.uniforms[k].value = v; });
-  sky.material.uniforms.sunPosition.value.copy(sunDir);
+  const envScene = new THREE.Scene(), envSky = new THREE.Mesh(sky.geometry, sky.material); envSky.scale.setScalar(5000); envScene.add(envSky); // reflections: the sky alone
   const pm = new THREE.PMREMGenerator(renderer);
-  scene.environment = pm.fromScene(scene, 0, 0.1, 6000).texture; pm.dispose();
-  scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x7a6a45, 1.6));
-  const sun = new THREE.DirectionalLight(0xffd2a0, 3.2); sun.position.copy(sunDir).multiplyScalar(100); scene.add(sun);
-  scene.fog = new THREE.FogExp2(0xc9c4b4, 0.0028);
-
+  const hemi = new THREE.HemisphereLight(); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(); scene.add(sun);
+  scene.fog = new THREE.FogExp2(0xffffff, 0.003);
+  const sunDir = new THREE.Vector3(), dv = new THREE.Vector3(), tex = grassTexture();
   const col = new THREE.Color(), m = new THREE.Object3D();
-  { // ground
-    const geo = new THREE.PlaneGeometry(3000, 3000, 160, 160).rotateX(-Math.PI / 2), p = geo.attributes.position;
-    const c = new Float32Array(p.count * 3);
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), z = p.getZ(i); p.setY(i, groundH(x, z));
-      const n = 0.5 + 0.5 * Math.sin(x * 0.05 + Math.sin(z * 0.04) * 2) * Math.cos(z * 0.06);
-      col.setHSL(0.15, 0.25, 0.62 + n * 0.3); c.set([col.r, col.g, col.b], i * 3);
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(c, 3)); geo.computeVertexNormals();
-    scene.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: grassTexture(), vertexColors: true })));
-  }
 
   const uTime = { value: 0 };
-  let applyMow; // applyMow([x0, x1, z0, z1]) cuts the grass short inside the rectangle; applyMow(null) lets it all grow back
+  let applyMow, grassMat; // applyMow([x0, x1, z0, z1]) cuts the grass short inside the rectangle; applyMow(null) lets it all grow back
   { // wind-blown grass around the hunter
     const geo = new THREE.PlaneGeometry(0.1, 1, 1, 4).translate(0, 0.5, 0), p = geo.attributes.position;
     const c = new Float32Array(p.count * 3);
@@ -56,7 +43,7 @@ export function createEnvironment(scene, renderer) {
       const y = p.getY(i), s = 0.35 + 0.65 * y; p.setX(i, p.getX(i) * (1 - y * 0.85)); c.set([s, s, s], i * 3);
     }
     geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    const mat = grassMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
     mat.onBeforeCompile = s => {
       s.uniforms.uTime = uTime;
       s.vertexShader = 'uniform float uTime;\n' + s.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
@@ -74,52 +61,48 @@ export function createEnvironment(scene, renderer) {
     scene.add(grass);
     applyMow = rect => {
       for (let i = 0; i < N; i++) {
-        const o = i * 7, x = gd[o], z = gd[o + 1], cut = rect && x > rect[0] && x < rect[1] && z > rect[2] && z < rect[3];
-        m.position.set(x, 0, z); m.rotation.set(gd[o + 2], gd[o + 3], gd[o + 4]); m.scale.set(gd[o + 5], cut ? 0.07 : gd[o + 6], 1);
+        const o = i * 7, x = gd[o], z = gd[o + 1], h = floorH(x, z), cut = rect && x > rect[0] && x < rect[1] && z > rect[2] && z < rect[3];
+        const tall = map.grass(x, z, h) ? (cut ? 0.07 : gd[o + 6] * map.grassScale) : 0; // none under water
+        m.position.set(x, h, z); m.rotation.set(gd[o + 2], gd[o + 3], gd[o + 4]); m.scale.set(gd[o + 5], tall || 1e-4, 1);
         m.updateMatrix(); grass.setMatrixAt(i, m.matrix);
       }
       grass.instanceMatrix.needsUpdate = true;
     };
   }
 
-  const trees = []; // hidden for quarry hunted on open ground
-  const addTrees = (geo, n, hue) => {
-    const mesh = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial(), n);
-    for (let i = 0; i < n; i++) {
-      let x, z;
-      do { const r = rnd(150, 520), a = rnd(0, TAU); x = Math.cos(a) * r; z = Math.sin(a) * r; } while (Math.sin(x * 0.02) + Math.cos(z * 0.017 + 1) < 0.1);
-      const s = rnd(0.7, 1.5);
-      m.position.set(x, groundH(x, z), z); m.rotation.set(0, rnd(0, 6), 0); m.scale.set(s, s * rnd(0.9, 1.4), s); m.updateMatrix();
-      mesh.setMatrixAt(i, m.matrix); mesh.setColorAt(i, col.setHSL(hue + rnd(-0.03, 0.03), rnd(0.3, 0.5), rnd(0.12, 0.22)));
-    }
-    scene.add(mesh); trees.push(mesh);
-  };
-  addTrees(new THREE.ConeGeometry(3, 13, 7).translate(0, 6.5, 0), 700, 0.33);
-  addTrees(new THREE.IcosahedronGeometry(4.5, 1).scale(1, 1.2, 1).translate(0, 5, 0), 500, 0.27);
-
-  // Thrush stand: a belt of olive-like trees 34–62 m in front of the line, where the birds come out of.
-  const grove = new THREE.Group(); grove.visible = false; scene.add(grove);
-  {
-    const N = 90, trunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.16, 0.26, 2.6, 7).translate(0, 1.3, 0),
-      new THREE.MeshLambertMaterial({ color: 0x5c5248 }), N);
-    const crown = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(2.3, 1).scale(1.25, 0.8, 1.25).translate(0, 3.6, 0),
-      new THREE.MeshLambertMaterial(), N);
-    for (let i = 0; i < N; i++) {
-      const x = -55 + (i % 15) * 7.6 + rnd(-2.4, 2.4), z = -36 - (i / 15 | 0) * 4.6 + rnd(-1.6, 1.6), k = rnd(0.8, 1.25);
-      m.position.set(x, groundH(x, z), z); m.rotation.set(0, rnd(0, TAU), 0); m.scale.set(k, k * rnd(0.85, 1.15), k); m.updateMatrix();
-      trunk.setMatrixAt(i, m.matrix); crown.setMatrixAt(i, m.matrix);
-      crown.setColorAt(i, col.setHSL(rnd(0.2, 0.26), rnd(0.18, 0.3), rnd(0.28, 0.38)));
-    }
-    grove.add(trunk, crown);
+  const built = {};
+  let map = null, mowRect = null;
+  function setMap(id) {
+    map = built[id] ||= (() => { const b = BUILD[id](tex); b.group.visible = false; scene.add(b.group); return b; })();
+    for (const k in built) built[k].group.visible = built[k] === map;
+    setTerrain(map.height, map.water);
+    const L = map.light;
+    sunDir.setFromSphericalCoords(1, degToRad(L.sun[0]), degToRad(L.sun[1]));
+    const u = sky.material.uniforms;
+    [u.turbidity.value, u.rayleigh.value, u.mieCoefficient.value, u.mieDirectionalG.value] = L.sky;
+    u.sunPosition.value.copy(sunDir);
+    scene.environment?.dispose(); scene.environment = pm.fromScene(envScene, 0, 0.1, 6000).texture;
+    hemi.color.set(L.hemi[0]); hemi.groundColor.set(L.hemi[1]); hemi.intensity = L.hemi[2];
+    sun.color.set(L.sunColor); sun.intensity = L.sunI; sun.position.copy(sunDir).multiplyScalar(100);
+    scene.fog.color.set(L.fog[0]); scene.fog.density = L.fog[1];
+    grassMat.color.set(map.grassTint ?? 0xffffff);
+    applyMow(mowRect);
   }
+  setMap(MENU_MAP);
 
   let mown = false;
   return {
     uTime,
-    mow(rect) { applyMow(rect); mown = true; },
-    growBack() { if (mown) { applyMow(null); mown = false; } },
-    // Open-ground quarry hides the trees; thrushes get their grove.
-    setScenery(Q) { trees.forEach(t => { t.visible = !Q.open; }); grove.visible = Q.grove; },
-    resetScenery() { trees.forEach(t => { t.visible = true; }); grove.visible = false; },
+    mow(rect) { mowRect = rect; applyMow(rect); mown = true; },
+    growBack() { if (mown) { mowRect = null; applyMow(null); mown = false; } },
+    setMap,
+    reachable: p => map.reachable(p), // a bird down here can be fetched (not lost in the trees or the valley)
+    inWater: p => inWater(p.x, p.z),
+    // A bird down on the water drifts in to the bank in front of the line. True once it is ashore.
+    drift(p, dt) {
+      dv.set(-0.4 * p.x, 0, -2 - p.z); const d = dv.length();
+      p.addScaledVector(dv.normalize(), Math.min(d, Math.max(1.2, d / 7) * dt));
+      return !inWater(p.x, p.z);
+    },
   };
 }

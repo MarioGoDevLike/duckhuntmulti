@@ -8,8 +8,30 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500&family=Cinzel:wght@600;700&display=swap" rel="stylesheet">
 <title>Open Season — Bird Hunting</title>
+<style>
+/* Boot loader: shown from the first paint until the 3D models and fonts are in (App.jsx removes it). */
+#boot{position:fixed;inset:0;z-index:100;display:grid;place-content:center;justify-items:center;gap:18px;
+  background:radial-gradient(ellipse at 50% 40%,#2a3324 0%,#12160f 70%);color:#efe6cf;font-family:'Barlow Condensed',system-ui,sans-serif;transition:opacity .5s}
+#boot.gone{opacity:0;pointer-events:none}
+#boot svg{width:96px;height:96px;animation:sweep 2.4s ease-in-out infinite}
+#boot h1{margin:0;font:700 34px 'Cinzel',Georgia,serif;letter-spacing:3px}
+#boot p{margin:0;font-size:14px;letter-spacing:3px;text-transform:uppercase;color:#a9ad97}
+#boot .bar{width:200px;height:3px;background:rgba(239,230,207,.15);border-radius:2px;overflow:hidden}
+#boot .bar i{display:block;height:100%;width:6%;background:#e2c877;transition:width .4s}
+@keyframes sweep{0%,100%{transform:translateX(-14px) rotate(-6deg)}50%{transform:translateX(14px) rotate(6deg)}}
+@media (prefers-reduced-motion:reduce){#boot svg{animation:none}}
+</style>
 </head>
 <body>
+<div id="boot" role="status" aria-live="polite">
+  <svg viewBox="0 0 100 100" fill="none" stroke="#e2c877" stroke-width="3" aria-hidden="true">
+    <circle cx="50" cy="50" r="38"/><circle cx="50" cy="50" r="3" fill="#e2c877" stroke="none"/>
+    <path d="M50 4v24M50 72v24M4 50h24M72 50h24"/>
+  </svg>
+  <h1>Open Season</h1>
+  <p>Loading the hunt…</p>
+  <div class="bar"><i></i></div>
+</div>
 <div id="root"></div>
 <script type="module" src="/src/main.jsx"></script>
 </body>

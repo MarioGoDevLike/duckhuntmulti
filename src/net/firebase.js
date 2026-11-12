@@ -95,13 +95,13 @@ export const leaveRoom = (code, uid) => updateDoc(roomRef(code), { members: arra
 
 // Starts a round 5 s from now (server time) for everyone in the room. Safe to call from several
 // clients at once: the transaction lets only one of them start it. firstOnly: the auto-start when the room fills.
-// quarry: what everyone hunts this round, chosen by whoever starts it.
-export const startRound = (code, offset, seconds, quarry, firstOnly = false) => runTransaction(db, async tx => {
+// quarry, map: what everyone hunts this round and where, chosen by whoever starts it.
+export const startRound = (code, offset, seconds, quarry, map, firstOnly = false) => runTransaction(db, async tx => {
   const s = await tx.get(roomRef(code)), r = s.data(), now = Date.now() + offset;
   if (r.members.length < 2 || !roundOver(r, now) || (firstOnly && r.round > 0)) return;
   const startAt = now + 5000;
   tx.update(roomRef(code), {
-    status: 'play', round: r.round + 1, seed: Math.random() * 2 ** 31 | 0, slots: r.members, quarry,
+    status: 'play', round: r.round + 1, seed: Math.random() * 2 ** 31 | 0, slots: r.members, quarry, map,
     startAt: Timestamp.fromMillis(startAt), endAt: Timestamp.fromMillis(startAt + seconds * 1000),
   });
 });

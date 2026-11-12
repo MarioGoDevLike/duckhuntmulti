@@ -1,3 +1,6 @@
 # Installed and built on each machine (Vercel runs npm install + vite build itself)
 node_modules/
 dist/
+
+# Too heavy for the repo (64 MB); re-download from Sketchfab to re-render the chaffinch card (art-source/blender/chaffinch_card.py)
+art-source/models/pinson_des_arbres.glb

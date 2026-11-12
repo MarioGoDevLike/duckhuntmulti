@@ -30,12 +30,12 @@ function findCalls(buffer) {
 }
 
 // Must be created from a user gesture (browsers keep audio suspended until one).
-export function createAudio() {
+export function createAudio(volume = 1) {
   const ac = new (window.AudioContext || window.webkitAudioContext)();
   // Brick-wall limiter so stacked shots and calls never clip.
   const out = ac.createDynamicsCompressor();
   Object.entries({ threshold: -8, knee: 0, ratio: 20, attack: 0.002, release: 0.2 }).forEach(([k, v]) => { out[k].value = v; });
-  out.connect(ac.destination);
+  const master = ac.createGain(); master.gain.value = volume; out.connect(master).connect(ac.destination);
 
   const buf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate), d = buf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -144,6 +144,7 @@ export function createAudio() {
 
   return {
     resume: () => ac.resume(),
+    setVolume(v) { master.gain.setTargetAtTime(v, ac.currentTime, 0.05); },
     // Listener follows the hunter's head.
     listen(cam) {
       const L = ac.listener; cam.getWorldPosition(lp); cam.getWorldDirection(lf);
