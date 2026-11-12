@@ -91,8 +91,9 @@ export default function App() {
   const [roomErr, setRoomErr] = useState('');
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
-  const [live, setLive] = useState({});            // night: the live channel's poses, by uid
+  const [live, setLive] = useState({});            // the live channel: poses and scores, by uid
   const net = useRef({ round: 0 });
+  const seenShots = useRef({});                    // night, live channel: the shots of each other hunter already applied here
 
   /* ---------- the engine ---------- */
   useEffect(() => {
@@ -101,26 +102,32 @@ export default function App() {
       onMsg: say,
       onPause: () => setPhase('paused'),
       // r.quarry is what was actually hunted (a room's pick in a room round), so the score goes on that board.
+      // The final score goes on our Firestore card too (the results screen, and anyone who joins later, read it there);
+      // our live entry keeps it until the next round, so the others' results don't wait on that write.
       onEnd: r => {
-        if (net.current.live) clearLive(net.current.code, net.current.uid);
         const key = bestKey(r.quarry), prev = +read(key) || 0, record = r.score > prev, n = net.current;
         if (record) store(key, r.score);
-        if (n.playing) { n.playing = false; updatePlayer(n.code, n.uid, { score: r.score, ducks: r.ducks }); }
+        if (n.playing) {
+          n.playing = false; updatePlayer(n.code, n.uid, { score: r.score, ducks: r.ducks });
+          if (n.live) publishLive(n.code, n.uid, { ...n.liveData, score: r.score, ducks: r.ducks, round: n.round });
+        }
         setBests(b => ({ ...b, [r.quarry]: Math.max(prev, r.score) })); setBoardQuarry(r.quarry);
         setResult({ ...r, record, round: n.code ? n.round : 0 }); setLiveRound(0); setPhase('over');
       },
-      // Room only: claim the bird. If another hunter's claim landed first, the points come back off.
+      // Room only: claim the bird. If another hunter's claim landed first, the points come back off. The new score
+      // travels with our live entry (free); only without the live channel is it written to our Firestore card.
       onKill: (id, pts) => {
         const n = net.current; if (!n.playing) return;
         claimKill(n.code, n.round, id, n.uid).then(ok => {
           if (!n.playing) return;
           if (!ok) { game.current.revokeKill(pts); say('Another hunter got that one first'); }
-          else updatePlayer(n.code, n.uid, { score: n.hud.score, ducks: n.hud.ducks });
+          if (n.live) publishLive(n.code, n.uid, { ...n.liveData, score: n.hud.score, ducks: n.hud.ducks, round: n.round });
+          else if (ok) updatePlayer(n.code, n.uid, { score: n.hud.score, ducks: n.hud.ducks });
         });
       },
-      // Room only: share where we're looking (only when it changed), our shots and, at night, the lamp. It goes over the
-      // live channel (Realtime Database), which charges by data rather than by write: twice a second, or ten times at
-      // night (the guns aim by the lamper's beam). Without that channel configured it falls back to Firestore, twice a second.
+      // Room only: share where we're looking (only when it changed), our shots and score and, at night, the lamp. It goes
+      // over the live channel (Realtime Database), which charges by data rather than by write: twice a second, or ten
+      // times at night (the guns aim by the lamper's beam). Without that channel it falls back to Firestore, twice a second.
       onPose: ({ yaw, pitch, shots, lamp }) => {
         const n = net.current, l = n.pose; if (!n.playing) return;
         const lampKey = lamp ? `${+lamp.on}${+lamp.spot}${+lamp.red}${lamp.bat}` : '';
@@ -128,11 +135,15 @@ export default function App() {
         if (l && l.shots === shots && l.lampKey === lampKey && Math.abs(l.yaw - yaw) < still && Math.abs(l.pitch - pitch) < still) return;
         n.pose = { yaw, pitch, shots, lampKey };
         const data = { yaw: +yaw.toFixed(3), pitch: +pitch.toFixed(3), shots, ...(lamp ? { lamp } : {}) };
-        if (n.live) publishLive(n.code, n.uid, { ...data, round: n.round });
+        if (n.live) { n.liveData = data; publishLive(n.code, n.uid, { ...data, score: n.hud.score, ducks: n.hud.ducks, round: n.round }); }
         else updatePlayer(n.code, n.uid, data);
       },
-      // Night: what our screen decided for the room (as the lamper), and our callouts.
-      onNightEvent: ev => { const n = net.current; if (n.playing) sendNightEvent(n.code, n.round, n.uid, ev); },
+      // Night: what our screen decided for the room (as the lamper), and our callouts. With the live channel a shot's
+      // spook isn't sent: the others count our shots on it instead (see the live channel effect below).
+      onNightEvent: ev => {
+        const n = net.current; if (!n.playing || (n.live && ev.t === 'spook')) return;
+        sendNightEvent(n.code, n.round, n.uid, ev);
+      },
       onCall: k => {
         const n = net.current, text = callText(n.role, k); if (!text) return;
         say(`You: “${text}”`);
@@ -162,9 +173,11 @@ export default function App() {
     const startAt = roomData.startAt.toMillis() - room.offset; // server time → this machine's clock
     if (startAt + roundTime(rq) * 1000 <= Date.now()) return;  // that round already finished
     const myRole = isNight ? (roomData.lamp === user.uid ? 'lamp' : 'gun') : 'gun';
-    Object.assign(n, { round: roomData.round, playing: true, pose: null, code: room.code, uid: user.uid, night: isNight, live: liveEnabled, role: myRole });
+    Object.assign(n, { round: roomData.round, playing: true, pose: null, code: room.code, uid: user.uid, night: isNight, live: liveEnabled, role: myRole,
+      liveData: { yaw: 0, pitch: 0, shots: 0 } });
+    seenShots.current = {};
     updatePlayer(room.code, user.uid, { score: 0, ducks: 0, shots: 0, round: n.round, weapon });
-    setMsg({ id: 0, text: '' }); setLive({});
+    setMsg({ id: 0, text: '' });
     game.current.start(weapon, {
       seed: roomData.seed, startAt, slot: roomData.slots.indexOf(user.uid), count: roomData.slots.length, quarry: rq, map: roomData.map,
       role: myRole, lampSlot: isNight ? roomData.slots.indexOf(roomData.lamp) : -1, poseEvery: isNight && n.live ? 0.1 : 0.5,
@@ -183,11 +196,21 @@ export default function App() {
     });
   }, [liveRound]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // The live channel's poses, day and night.
+  // The live channel: everyone's pose and score, for as long as we're in the room (so the results screen gets the
+  // others' final scores from it too). At night each new shot of theirs spooks the birds here, as it did on their screen.
   useEffect(() => {
-    if (!liveRound || !room || !user || !net.current.live) return;
-    return watchLive(room.code, setLive);
-  }, [liveRound]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!room || !liveEnabled) return;
+    return watchLive(room.code, all => {
+      setLive(all);
+      const n = net.current; if (!n.playing || !n.night) return;
+      for (const [id, p] of Object.entries(all)) {
+        if (id === n.uid || p.round !== n.round) continue;
+        const was = seenShots.current[id] || 0;
+        for (let i = was; i < p.shots; i++) game.current.nightEvent({ t: 'spook' });
+        seenShots.current[id] = Math.max(was, p.shots);
+      }
+    });
+  }, [room]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Night: the lamper's decisions and everyone's callouts.
   useEffect(() => {
@@ -223,7 +246,7 @@ export default function App() {
   const leave = () => {
     if (room && user) { leaveRoom(room.code, user.uid).catch(console.error); clearLive(room.code, user.uid); }
     game.current.quit();
-    net.current = { round: 0 }; setRoom(null); setRoomData(null); setPlayers([]); setLiveRound(0); setRoomErr(''); setPhase('home');
+    net.current = { round: 0 }; setRoom(null); setRoomData(null); setPlayers([]); setLive({}); setLiveRound(0); setRoomErr(''); setPhase('home');
   };
 
   /* ---------- solo ---------- */
@@ -242,10 +265,16 @@ export default function App() {
   const mapPicker = <MapPicker quarry={quarry} value={map} onPick={pickMap} pictures={mapPics} always />;
   const gunPicker = <GunPicker value={weapon} onPick={pickWeapon} pictures={gunPics} />;
 
-  // Players of a round, best first. Our own live score comes from the HUD, the others' from Firestore.
+  // Players of a round, best first. Our own score comes from the HUD while we hunt; the others' from their live entry
+  // when it is of this round, else from their Firestore card (which has it only once their round ends, or always
+  // without the live channel).
   const standings = round => players
     .filter(p => p.round === round && (!roomData?.slots || roomData.slots.includes(p.id)))
-    .map(p => (p.id === user?.uid && phase === 'play' ? { ...p, score: hud.score, ducks: hud.ducks } : p))
+    .map(p => {
+      if (p.id === user?.uid && phase === 'play') return { ...p, score: hud.score, ducks: hud.ducks };
+      const l = live[p.id];
+      return l?.round === round && l.score != null ? { ...p, score: l.score, ducks: l.ducks } : p;
+    })
     .sort((a, b) => b.score - a.score);
 
   const lobbyMembers = roomData ? roomData.members.map(id => players.find(p => p.id === id) || { id, name: '…', weapon: 'semi', role: 'gun' }) : [];
