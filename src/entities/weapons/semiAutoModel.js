@@ -2,6 +2,7 @@
 // Until it loads, or if it fails, the procedural gun (semiAuto.js) stays in the hands.
 import * as THREE from 'three';
 import { loadModel, prepareModel } from '../../core/gltf.js';
+// import { mountShotkam } from './shotkam.js'; // SHOTKAM MODEL OFF
 import shotgunUrl from '../../assets/models/low_poly_shotgun.glb?url';
 
 // Model frame as loaded: already the gun frame's orientation (barrel along -z, rib on +y), in large units — muzzle at
@@ -18,9 +19,11 @@ export const semiAutoModelReady = loadModel(shotgunUrl, 'Semi-auto').then(gl => 
   prepareModel(gl.scene);
   gl.scene.scale.setScalar(SCALE); gl.scene.position.copy(OFFSET);
   const gun = new THREE.Group(); gun.add(gl.scene);
+  const muzzle = toGun(0, 0.356, -2.477);
+  // SHOTKAM MODEL OFF (for now): mountShotkam(gun, muzzle); // the barrel camera, near the muzzle
   return {
     gun,
-    muzzle: toGun(0, 0.356, -2.477),
+    muzzle,
     port: new THREE.Vector3(0, -0.036, -0.12), // loading port: under the receiver, just ahead of the trigger guard
     // Measured on the model in gun space: behind the trigger is a sloping wrist rather than a pistol grip, so the trigger
     // hand tilts further than on the procedural gun, index finger on the trigger. The forend (z -0.51 … -0.18, 3.8 cm

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mesh } from '../../core/meshes.js';
+// import { mountShotkam } from './shotkam.js'; // SHOTKAM MODEL OFF
 import { mats, profile, tube, tubeX, ring, knurl } from './gunKit.js';
 
 const { lerp } = THREE.MathUtils;
@@ -52,5 +53,6 @@ export function makeOverUnder() {
   const guard = mesh(new THREE.TorusGeometry(0.019, 0.0028, 10, 32).rotateY(Math.PI / 2), K.satin, g, 0, -0.033, -0.03);
   guard.scale.set(1, 0.85, 1.15);
   mesh(profile([[0.004, -0.026], [-0.004, -0.026], [-0.01, -0.036], [-0.007, -0.046], [0.0, -0.039]], 0.004, { bevel: 0.0008 }), K.steel, g);
+  // SHOTKAM MODEL OFF (for now): mountShotkam(g, new THREE.Vector3(0, OU_BARRELS[1], -0.98)); // the barrel camera, under the bottom barrel
   return g;
 }

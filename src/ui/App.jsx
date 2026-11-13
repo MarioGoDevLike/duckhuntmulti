@@ -1,22 +1,23 @@
 // The composition root: creates the game on the canvas, owns the screen flow (phase) and the room session,
 // and bridges the engine's callbacks to React state and Firestore. Screens themselves are in components/.
 import { useEffect, useRef, useState } from 'react';
-import { WEAPONS, QUARRY, roundTime } from '../config/gameplay.js';
+import { WEAPONS, QUARRY, roundTime, chokesFor } from '../config/gameplay.js';
 import { createGame } from '../game/createGame.js';
 import { birdPortraits } from '../entities/birds/portraits.js';
 import { birdModelsReady } from '../entities/birds/models.js';
 import { gunPortraits, gunModelsReady } from '../entities/weapons/portraits.js';
 import { dogModelReady } from '../entities/retriever/labrador.js';
+import { mapModelsReady } from '../world/maps.js';
 import {
   watchUser, login, MAX_PLAYERS, roundOver,
-  createRoom, joinRoom, leaveRoom, startRound, watchRoom, watchPlayers, watchKills, claimKill, updatePlayer,
+  createRoom, joinRoom, leaveRoom, startRound, hostOf, setRoomHunt, watchRoom, watchPlayers, watchKills, claimKill, updatePlayer,
   liveEnabled, publishLive, watchLive, clearLive, sendNightEvent, watchNightEvents,
 } from '../net/firebase.js';
 import { KEYS, bestKey, store, read } from './lib/storage.js';
 import { roomErrorText, signInErrorText, callText } from './lib/messages.js';
 import { useLeaderboard } from './hooks/useLeaderboard.js';
 import { usePortrait } from './hooks/useDevice.js';
-import { QuarryPicker, GunPicker, MapPicker } from './components/Pickers.jsx';
+import { QuarryPicker, GunPicker, ChokePicker, MapPicker } from './components/Pickers.jsx';
 import { MAPS, mapOf } from '../config/maps.js';
 import { SETTINGS } from '../config/gameplay.js';
 import Hud from './components/Hud.jsx';
@@ -38,6 +39,8 @@ export default function App() {
   const [tab, setTab] = useState(null);       // home menu: null (the list) | hunt | friends | board | controls | settings
   const [weapon, setWeapon] = useState(() => saved(KEYS.weapon, WEAPONS, 'semi'));
   const [quarry, setQuarry] = useState(() => saved(KEYS.quarry, QUARRY, 'duck'));
+  const [chokePicks, setChokePicks] = useState(() => { try { return JSON.parse(read(KEYS.chokes)) || {}; } catch { return {}; } }); // weapon → choke per barrel
+  const chokes = chokesFor(weapon, chokePicks[weapon]);
   const [maps, setMaps] = useState(() => { try { return JSON.parse(read(KEYS.maps)) || {}; } catch { return {}; } }); // quarry → chosen map
   const map = mapOf(maps[quarry], quarry);
   const [mapPics, setMapPics] = useState({}); // small views of each map, rendered behind the boot loader
@@ -64,7 +67,7 @@ export default function App() {
   // placeholder pictures first. Registered after the portrait effects, so those have re-rendered by then.
   useEffect(() => {
     const boot = document.getElementById('boot'); if (!boot) return;
-    const jobs = [birdModelsReady, gunModelsReady, dogModelReady, document.fonts?.ready].filter(Boolean), bar = boot.querySelector('i');
+    const jobs = [birdModelsReady, gunModelsReady, dogModelReady, mapModelsReady, document.fonts?.ready].filter(Boolean), bar = boot.querySelector('i');
     let done = 0;
     jobs.forEach(p => p.catch(() => {}).finally(() => { bar.style.width = `${++done / jobs.length * 100}%`; }));
     const timeout = new Promise(r => setTimeout(r, 20000)); // a slow or failed download never locks the player out
@@ -166,8 +169,11 @@ export default function App() {
   useEffect(() => {
     if (!room || !roomData || !user) return;
     const n = net.current;
-    // A full room starts by itself, except for a night hunt, which waits for someone to take the lamp.
-    if (roomData.members.length >= MAX_PLAYERS && roomData.round === 0 && !QUARRY[quarry].night) startRound(room.code, room.offset, roundTime(quarry), quarry, map, true).catch(console.error);
+    // A full room starts by itself (from the host's screen, with the host's pick), except for a night hunt, which waits
+    // for someone to take the lamp.
+    const pickQ = roomData.quarry || 'duck';
+    if (hostOf(roomData) === user.uid && roomData.members.length >= MAX_PLAYERS && roomData.round === 0 && !QUARRY[pickQ].night)
+      startRound(room.code, room.offset, roundTime(pickQ), pickQ, mapOf(roomData.map, pickQ), true).catch(console.error);
     if (roomData.status !== 'play' || roomData.round <= n.round || !roomData.slots.includes(user.uid)) return;
     const rq = roomData.quarry || 'duck', isNight = !!QUARRY[rq]?.night;
     const startAt = roomData.startAt.toMillis() - room.offset; // server time → this machine's clock
@@ -181,7 +187,7 @@ export default function App() {
     game.current.start(weapon, {
       seed: roomData.seed, startAt, slot: roomData.slots.indexOf(user.uid), count: roomData.slots.length, quarry: rq, map: roomData.map,
       role: myRole, lampSlot: isNight ? roomData.slots.indexOf(roomData.lamp) : -1, poseEvery: isNight && n.live ? 0.1 : 0.5,
-    });
+    }, undefined, undefined, chokes);
     setLiveRound(n.round); setPhase('play');
   }, [roomData]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -235,12 +241,13 @@ export default function App() {
     promise.then(r => { net.current = { round: 0 }; setRoomData(null); setPlayers([]); setRoom(r); setPhase('lobby'); },
       err => { console.error(err); setRoomErr(roomErrorText(err)); }).finally(() => setBusy(false));
   };
-  const create = () => enterRoom(createRoom(user, weapon));
+  const create = () => enterRoom(createRoom(user, weapon, quarry, map));
   const join = () => joinCode.trim() && enterRoom(joinRoom(joinCode, user, weapon));
   const startHunt = () => {
+    if (!canStart) return;
     game.current.unlockAudio();
-    const lamp = QUARRY[quarry].night ? lobbyMembers.find(p => p.role === 'lamp')?.id : null;
-    startRound(room.code, room.offset, roundTime(quarry), quarry, map, false, lamp).catch(err => setRoomErr(roomErrorText(err)));
+    const lamp = QUARRY[roomQ].night ? lobbyMembers.find(p => p.role === 'lamp')?.id : null;
+    startRound(room.code, room.offset, roundTime(roomQ), roomQ, roomMap, false, lamp).catch(err => setRoomErr(roomErrorText(err)));
   };
   const pickRole = r => { if (room && user) updatePlayer(room.code, user.uid, { role: r }); };
   const leave = () => {
@@ -252,18 +259,20 @@ export default function App() {
   /* ---------- solo ---------- */
   const pickWeapon = k => { setWeapon(k); store(KEYS.weapon, k); if (room && user) updatePlayer(room.code, user.uid, { weapon: k }); };
   const pickQuarry = k => { setQuarry(k); store(KEYS.quarry, k); setBoardQuarry(k); };
-  const pickMap = k => setMaps(m => { const next = { ...m, [quarry]: k }; store(KEYS.maps, JSON.stringify(next)); return next; });
+  const pickChoke = (barrel, k) => setChokePicks(c => {
+    const next = { ...c, [weapon]: chokes.map((v, i) => (i === barrel ? k : v)) }; store(KEYS.chokes, JSON.stringify(next)); return next;
+  });
+  const pickMap = (k, q = quarry) => setMaps(m => { const next = { ...m, [q]: k }; store(KEYS.maps, JSON.stringify(next)); return next; });
   const soloOk = !QUARRY[quarry].night || NIGHT_SOLO;
-  const play = () => { if (!soloOk) return; setMsg({ id: 0, text: '' }); game.current.start(weapon, undefined, quarry, map); setPhase('play'); };
+  const play = () => { if (!soloOk) return; setMsg({ id: 0, text: '' }); game.current.start(weapon, undefined, quarry, map, chokes); setPhase('play'); };
   const resume = () => { game.current.resume(); setPhase('play'); };
   const home = () => { game.current.quit(); setPhase('home'); };
   const inRoom = !!room;
 
   // What this hunt is after: our pick solo, the room's pick in a room round.
   const Q = QUARRY[inRoom && (phase === 'play' || phase === 'paused' || phase === 'over') ? roomData?.quarry || 'duck' : quarry];
-  const quarryPicker = <><QuarryPicker value={quarry} onPick={pickQuarry} portraits={portraits} /><MapPicker quarry={quarry} value={map} onPick={pickMap} /></>;
   const mapPicker = <MapPicker quarry={quarry} value={map} onPick={pickMap} pictures={mapPics} always />;
-  const gunPicker = <GunPicker value={weapon} onPick={pickWeapon} pictures={gunPics} />;
+  const gunPicker = <><GunPicker value={weapon} onPick={pickWeapon} pictures={gunPics} /><ChokePicker weapon={weapon} value={chokes} onPick={pickChoke} /></>;
 
   // Players of a round, best first. Our own score comes from the HUD while we hunt; the others' from their live entry
   // when it is of this round, else from their Firestore card (which has it only once their round ends, or always
@@ -277,9 +286,17 @@ export default function App() {
     })
     .sort((a, b) => b.score - a.score);
 
+  // The room's next hunt, picked by the host (see hostOf). Only the host gets the quarry and map pickers in the lobby;
+  // the others get the gun and choke pickers.
+  const isHost = !!user && hostOf(roomData) === user.uid;
+  const roomQ = roomData?.quarry || 'duck', roomMap = mapOf(roomData?.map, roomQ);
+  const hostPickQuarry = k => { pickQuarry(k); setRoomHunt(room.code, k, mapOf(maps[k], k)); };
+  const hostPickMap = k => { pickMap(k, roomQ); setRoomHunt(room.code, roomQ, k); };
+  const roomQuarryPicker = <><QuarryPicker value={roomQ} onPick={hostPickQuarry} portraits={portraits} />
+    <MapPicker quarry={roomQ} value={roomMap} onPick={hostPickMap} pictures={mapPics} /></>;
   const lobbyMembers = roomData ? roomData.members.map(id => players.find(p => p.id === id) || { id, name: '…', weapon: 'semi', role: 'gun' }) : [];
-  const canStart = roomData && roomData.members.length >= 2 && roundOver(roomData, Date.now() + (room?.offset || 0))
-    && (!QUARRY[quarry].night || nightReady(lobbyMembers));
+  const canStart = isHost && roomData.members.length >= 2 && roundOver(roomData, Date.now() + (room?.offset || 0))
+    && (!QUARRY[roomQ].night || nightReady(lobbyMembers));
 
   // End of a room round: final standings, the winner (none on a tie), and the bags laid out on the grass.
   const endRows = phase === 'over' && result && inRoom && result.round > 0 ? standings(result.round) : null;
@@ -316,15 +333,16 @@ export default function App() {
         <HomeMenu
           tab={tab} onTab={setTab} settings={settings} onSetting={changeSetting}
           account={{ user, signIn, netErr, board: { ...board, quarry: boardQuarry, onQuarry: setBoardQuarry } }}
-          loadout={{ quarryName: QUARRY[quarry].name, mapName: MAPS[map].name, weaponName: WEAPONS[weapon].name, best: bests[quarry], onPlay: play,
+          loadout={{ quarryName: QUARRY[quarry].name, mapName: MAPS[map].name, weaponName: `${WEAPONS[weapon].name} · choke ${chokes.join('/')}`, best: bests[quarry], onPlay: play,
             time: roundTime(quarry), soloOk, test: !!QUARRY[quarry].night && NIGHT_SOLO }}
           rooms={{ busy, joinCode, setJoinCode, create, join, error: roomErr }}
           quarryPicker={<QuarryPicker value={quarry} onPick={pickQuarry} portraits={portraits} />} mapPicker={mapPicker} gunPicker={gunPicker}
         />
       )}
       {phase === 'lobby' && (
-        <Lobby room={room} roomData={roomData} members={lobbyMembers} me={user?.uid} canStart={canStart} onStart={startHunt} onLeave={leave}
-          error={roomErr} quarryPicker={quarryPicker} gunPicker={gunPicker} night={!!QUARRY[quarry].night} onRole={pickRole} />
+        <Lobby room={room} roomData={roomData} members={lobbyMembers} me={user?.uid} isHost={isHost} canStart={canStart} onStart={startHunt} onLeave={leave}
+          error={roomErr} quarryPicker={roomQuarryPicker} gunPicker={gunPicker} night={!!QUARRY[roomQ].night} onRole={pickRole}
+          hunt={{ quarry: QUARRY[roomQ], map: MAPS[roomMap], portrait: portraits[roomQ] }} />
       )}
       {phase === 'over' && result && (
         <HuntOver result={result} verdict={verdict} Q={Q} best={bests[Q.kind]} netErr={netErr} inRoom={inRoom}

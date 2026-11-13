@@ -1,5 +1,5 @@
-// The main menu: a centered window over the live scene listing Hunt / Multiplayer / Leaderboard / Controls / Settings;
-// each opens in the same window.
+// The main menu: a full-height sidebar on the left of the live scene listing Hunt / Multiplayer / Controls / Settings,
+// each opening in the same sidebar, with the leaderboard docked on the right (menu only, never in a hunt).
 import { useState } from 'react';
 import { QUARRY } from '../../config/gameplay.js';
 import { TOUCH } from '../../config/platform.js';
@@ -10,7 +10,7 @@ const CONTROLS = TOUCH
   ? [['Drag', 'Look around'], ['AIM', 'Look down the rib'], ['FIRE / RELOAD', 'On-screen buttons'], ['PICK UP', 'Hold a retrieved bird']]
   : [['Mouse', 'Look around'], ['Hold right click', 'Aim down the rib'], ['Left click', 'Fire'], ['R', 'Reload'], ['E', 'Pick up a retrieved bird'], ['Esc', 'Pause']];
 
-const SignInFirst = ({ what }) => <div className="empty">Sign in with Google below to {what}.</div>;
+const SignInFirst = ({ what }) => <div className="empty">Sign in with Google from the menu to {what}.</div>;
 
 // One board per quarry. board: { rows, quarry, onQuarry } — rows are the top 10 for board.quarry.
 function Leaderboard({ user, board, error }) {
@@ -19,7 +19,7 @@ function Leaderboard({ user, board, error }) {
   const list = !board.rows ? !error && <div className="empty">Loading…</div>
     : !board.rows.length ? <div className="empty">No {Q.name} scores yet. Finish a {Q.name.toLowerCase()} hunt to post the first one.</div>
     : (
-      <ol className="board">
+      <ol className="board ranked">
         {board.rows.map((r, i) => (
           <li key={r.id} className={r.id === user.uid ? 'me' : ''}>
             <span>{i + 1}</span><span>{r.name}</span><span>{r.ducks} {r.ducks === 1 ? Q.one : Q.many}</span><b>{r.score}</b>
@@ -28,11 +28,12 @@ function Leaderboard({ user, board, error }) {
       </ol>
     );
   return <>
-    <div className="boardtabs" role="radiogroup" aria-label="Leaderboard">
-      {Object.entries(QUARRY).map(([k, q]) => (
-        <button key={k} role="radio" aria-checked={k === board.quarry} className={k === board.quarry ? 'on' : ''} onClick={() => board.onQuarry(k)}>{q.name}</button>
-      ))}
-    </div>
+    <label className="boardpick">
+      <span>Bird</span>
+      <select value={board.quarry} onChange={e => board.onQuarry(e.target.value)}>
+        {Object.entries(QUARRY).map(([k, q]) => <option key={k} value={k}>{q.name}</option>)}
+      </select>
+    </label>
     {list}
   </>;
 }
@@ -43,7 +44,7 @@ function Rooms({ user, weaponName, rooms }) {
   return (
     <div className="rooms">
       <div className="sect">Hunt with friends · 2–{MAX_PLAYERS} players</div>
-      <p className="hint">Create a room and share its code, or enter a friend's code. Your quarry and <b>{weaponName}</b> come from the Hunt tab.</p>
+      <p className="hint">Create a room and share its code, or enter a friend's code. The room's creator picks the bird and starts the hunt; the others pick their gun and choke in the room. You bring your <b>{weaponName}</b> from the Hunt tab.</p>
       <button className="cta" disabled={busy} onClick={create}>Create room</button>
       <div className="or">or join one</div>
       <div className="row">
@@ -62,6 +63,8 @@ const Credits = () => (
     <a href="https://sketchfab.com/3d-models/dead-chaffinch-dfeff4e123e54952b3acbd3de864fd7f" target="_blank" rel="noreferrer">“Dead Chaffinch”</a> by b-unicycling (cut out of its ground) ·{' '}
     <a href="https://sketchfab.com/3d-models/pinson-des-arbres-acca221178bc432392c681155a56b5b6" target="_blank" rel="noreferrer">“Pinson des arbres”</a> by pattarrian (chaffinch card) ·{' '}
     <a href="https://sketchfab.com/3d-models/swainsons-thrush-in-flight-8784ede7ab0a46ad9967a772676e5c47" target="_blank" rel="noreferrer">“Swainson's Thrush - in Flight”</a> by osuecampus (wingbeat re-posed) ·{' '}
+    <a href="https://sketchfab.com/3d-models/mourning-dove-in-flight-37f9b2cc8b174fc3a2d8ba9f5b467b1a" target="_blank" rel="noreferrer">“Mourning Dove - in Flight”</a> and{' '}
+    <a href="https://sketchfab.com/3d-models/mourning-dove-8ef704c7846d4782b76efd2a955d5b4e" target="_blank" rel="noreferrer">“Mourning Dove”</a> by osuecampus ·{' '}
     <a href="https://sketchfab.com/3d-models/realistic-mallard-duck-game-ready-asset-dd33cd2e30944a4aae2de1a06a828f4f" target="_blank" rel="noreferrer">“Realistic Mallard Duck”</a> by 3Dima ·{' '}
     <a href="https://sketchfab.com/3d-models/labrador-dog-1f56cfbab07e4fe49b5d9e521c82073a" target="_blank" rel="noreferrer">“Labrador Dog”</a> by kenchoo (gallop added) ·{' '}
     <a href="https://sketchfab.com/3d-models/low-poly-shotgun-bff766c9561e4bccb27f2036b9d3090a" target="_blank" rel="noreferrer">“low poly shotgun”</a> by leoxx300 ·{' '}
@@ -121,14 +124,14 @@ export default function HomeMenu({ tab, onTab, account, loadout, rooms, quarryPi
   const { user, signIn, netErr, board } = account;
   const tabs = [
     ['hunt', 'Hunt', 'Choose your bird, ground and gun'],
-    ...(enabled ? [['friends', 'Multiplayer', 'Hunt with friends in a room'], ['board', 'Leaderboard', 'Top hunters for each quarry']] : []),
+    ...(enabled ? [['friends', 'Multiplayer', 'Hunt with friends in a room']] : []),
     ['controls', 'Controls', 'Keys, buttons and tips'],
     ['settings', 'Settings', 'Sound, aim and view'],
   ];
   const open = tabs.find(([k]) => k === tab);
   return (
     <div className="menu-screen">
-      <section className="menu-panel" aria-label="Main menu">
+      <section className={`menu-panel${open ? ' open' : ''}`} aria-label="Main menu">
         {!open ? <>
           <header className="brand">
             <div className="kicker">Wetland &amp; upland bird hunting</div>
@@ -159,10 +162,6 @@ export default function HomeMenu({ tab, onTab, account, loadout, rooms, quarryPi
           {tab === 'hunt' && <HuntSteps pickers={[quarryPicker, mapPicker, gunPicker]} loadout={loadout} />}
           {tab !== 'hunt' && <div className="tabpanel">
             {tab === 'friends' && <Rooms user={user} weaponName={loadout.weaponName} rooms={rooms} />}
-            {tab === 'board' && <>
-              <div className="sect">Top hunters</div>
-              <Leaderboard user={user} board={board} error={netErr} />
-            </>}
             {tab === 'controls' && <dl className="keys">
               {CONTROLS.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
               <p className="hint">The shot takes time to reach the birds: swing through and fire in front of fast ones. Doubles score ×2.{TOUCH && ' Played in landscape.'}</p>
@@ -171,6 +170,15 @@ export default function HomeMenu({ tab, onTab, account, loadout, rooms, quarryPi
           </div>}
         </>}
       </section>
+      {enabled && (
+        <aside className="menu-board" aria-label="Leaderboard">
+          <header className="board-head">
+            <div className="kicker">Leaderboard</div>
+            <h2>Top hunters</h2>
+          </header>
+          <Leaderboard user={user} board={board} error={netErr} />
+        </aside>
+      )}
     </div>
   );
 }

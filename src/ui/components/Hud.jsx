@@ -1,6 +1,7 @@
 // In-hunt overlay: score and clock, room standings, countdown, reticle, messages, shells, and the touch controls;
 // on a night hunt also the lamp (for whoever holds it), the party's bag and the birds in the air.
 import { TOUCH } from '../../config/platform.js';
+import { CHOKES } from '../../config/gameplay.js';
 import { clock, capitalize } from '../lib/format.js';
 import { callText } from '../lib/messages.js';
 
@@ -54,6 +55,7 @@ export default function Hud({ hud, Q, best, msg, standings, me, game }) {
         <div className="ammo">
           {hud.reloading ? <em>RELOADING…</em> : hud.shells === 0 && <em>EMPTY — {TOUCH ? 'tap RELOAD' : 'press R'}</em>}
           {Array.from({ length: hud.mag }, (_, i) => <i key={i} className={i < hud.shells ? 'on' : ''} />)}
+          {hud.choke && <small className="chokeNow">Choke {hud.choke} · {CHOKES[hud.choke]?.name}</small>}
         </div>
       )}
       {TOUCH && (

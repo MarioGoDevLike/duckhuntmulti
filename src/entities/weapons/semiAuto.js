@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mesh } from '../../core/meshes.js';
+// import { mountShotkam } from './shotkam.js'; // SHOTKAM MODEL OFF
 import { mats, profile, tube, tubeX, knurl } from './gunKit.js';
 
 /* ======================================================================================================
@@ -51,5 +52,6 @@ export function makeSemiAuto() {
   mesh(profile([[0.032, -0.022], [-0.036, -0.022], [-0.048, -0.036], [-0.02, -0.052], [0.02, -0.047], [0.036, -0.032]], 0.0065,
     { bevel: 0.0012, holes: [[[0.022, -0.028], [-0.03, -0.028], [-0.036, -0.035], [-0.017, -0.044], [0.016, -0.041]]] }), K.polymer, g);
   mesh(profile([[0.005, -0.025], [-0.001, -0.025], [-0.007, -0.034], [-0.005, -0.043], [0.002, -0.037]], 0.004, { bevel: 0.0008 }), K.steel, g);
+  // SHOTKAM MODEL OFF (for now): mountShotkam(g, new THREE.Vector3(0, BY, -0.98)); // the barrel camera, near the muzzle
   return g;
 }

@@ -5,10 +5,17 @@ import { quarryOf } from '../../config/gameplay.js';
 import { makeDuck } from './duck.js';
 import { makeFinch } from './finch.js';
 import { makeThrush } from './thrush.js';
-import { makeFinchCarcass, makeMallardModel, makeThrushModel } from './models.js';
+import { makeFinchCarcass, makeMallardModel, makeThrushModel, makeDoveModel, makeDoveCarcass } from './models.js';
 
-// The thrush is the rigged model once it has loaded (d.rig drives its wings); the rest are procedural in flight.
-export const makeBird = (kind, male) => ({ ...(kind === 'finch' ? makeFinch(male) : kind === 'thrush' ? makeThrushModel() ?? makeThrush() : makeDuck(male)), kind });
+// The thrush and the dove are rigged models once loaded (d.rig drives their wings); the rest are procedural in flight.
+// Until the dove has loaded (or if it fails) a procedural thrush, a little larger, stands in for it.
+const doveStandIn = () => { const d = makeThrush(); d.g.scale.multiplyScalar(1.1); return d; };
+const MAKE = {
+  finch: makeFinch,
+  thrush: () => makeThrushModel() ?? makeThrush(),
+  dove: () => makeDoveModel() ?? doveStandIn(),
+};
+export const makeBird = (kind, male) => ({ ...(MAKE[kind] ?? makeDuck)(male), kind });
 
 // Wings closed: the arm swings back along the body (a small bird's drops down against the flank) and the hand lies back along it.
 export function foldWings(d) {
@@ -16,7 +23,7 @@ export function foldWings(d) {
   for (const [a] of d.wings) foldWing(d, a);
 }
 function foldWing(d, a) {
-  const small = d.kind === 'finch' || d.kind === 'thrush'; // small birds tuck the wings down over the flanks
+  const small = d.kind !== 'duck'; // small birds tuck the wings down over the flanks
   // Small birds roll the closed wing onto its edge (about its own length), leading edge up, before swinging it
   // back, and drop it to the flank so it lies against the body; ducks keep it folded flat over the back.
   a.rotation.order = 'ZYX'; a.rotation.set(small ? -1.3 : 0, small ? 1.42 : 1.35, 0); a.position.y = -(d.foldDrop || 0);
@@ -37,18 +44,20 @@ export function poseWings(d, sx, fx, s2, f2) {
   });
 }
 
-// Once a chaffinch or a duck is down, its procedural model gives way to the real one: the chaffinch scan (already
-// lying on its side, so laid flat: lie 0) or the mallard (standing, so laid on its side: lie π/2). The rigged thrush
-// needs no swap; it folds its wings. Until a model has loaded (or if it failed) the bird keeps its procedural model.
-const CARCASS = { finch: makeFinchCarcass, duck: makeMallardModel };
+// Once a chaffinch, a duck or a dove is down, its flying model gives way to the real one: the chaffinch scan (already
+// lying on its side, so laid flat: lie 0), the mallard (standing, so laid on its side: lie π/2) or the perched dove
+// (wings closed; laid on its side or back as it falls, like the rigged thrush). The thrush needs no swap; it folds its
+// wings. Until a model has loaded (or if it failed) the bird keeps its flying model.
+const CARCASS = { finch: makeFinchCarcass, duck: makeMallardModel, dove: makeDoveCarcass };
+const LIE = { finch: 0, duck: Math.PI / 2 }; // a model that only lies one way
 // Turns the chaffinch scan's upper side toward a viewer looking down -z, head to the left (in the hand, on its card).
 export const SCAN_FACE = new THREE.Euler(Math.PI / 2 - 0.35, 0, -Math.PI / 2 - 0.4, 'ZYX');
 export function toCarcass(d) {
   if (d.carcass) return;
   const c = CARCASS[d.kind]?.(); if (!c) return;
-  d.g.traverse(o => o.geometry?.dispose()); // each procedural bird builds its own geometry; materials are shared kits
+  if (!d.rig) d.g.traverse(o => o.geometry?.dispose()); // each procedural bird builds its own geometry (a rigged clone shares it)
   d.g.clear(); c.scale.multiplyScalar(1 / d.g.scale.x); d.g.add(c);
-  d.carcass = true; d.wings = []; d.scan = d.kind === 'finch'; d.lie = d.scan ? 0 : Math.PI / 2;
+  d.carcass = true; d.wings = []; d.rig = null; d.scan = d.kind === 'finch'; d.lie = LIE[d.kind];
 }
 
 // Rest a downed bird on the ground (ground height y0) heading `yaw`, rolled `roll` onto a side or its back (a model

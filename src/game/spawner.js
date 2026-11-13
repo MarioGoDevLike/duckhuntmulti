@@ -4,11 +4,15 @@
 import * as THREE from 'three';
 import { rnd, TAU } from '../core/math.js';
 import { makeBird } from '../entities/birds/bird.js';
+import { DOVE } from '../config/gameplay.js';
+import { DOVE_FIELD } from '../world/maps.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-// o: { Q, map, R, flock, lag, facing (yaw most flights favour), voice (soundscape, or null for silent) }.
+// o: { Q, map, R, flock, lag, facing (yaw most flights favour), voice (soundscape, or null for silent),
+//      line (the hunters' x, standing along z = 0: the same on every screen in a room) }.
 export function spawnFlight(o) {
+  if (o.Q.kind === 'dove') return doves(o);
   if (o.Q.kind === 'finch') return finches(o);
   if (o.Q.kind === 'thrush') return thrush(o);
   return ducks(o);
@@ -83,4 +87,41 @@ function ridgeThrush({ R, flock, lag, voice }) {
   d.g.position.copy(p);
   flock.add(d, { vel: v.multiplyScalar(rr(18, 23)), alive: true, down: false, ph: 0, life: 0, wob: rr(0, 1), alt: rr(8, 18) }, true, lag);
   voice?.tsip(p);
+}
+
+// Mourning doves on the Sunflower Field (world/maps.js): singles, pairs and small loose bunches flying in from the far
+// side of the field, in front of the line, and on over the hunters to the roost trees behind them — straight at the
+// line, quartering across it, or wide to one side; a few drop out of the flight to drink at the pond. Each bird flies
+// its own line with its own speed, wingbeat and jinks (see dove() in entities/birds/flight.js).
+function doves({ R, flock, lag, line }) {
+  const rr = (a, b) => a + R() * (b - a), F = DOVE_FIELD;
+  const p = new THREE.Vector3(), dir = new THREE.Vector3();
+  let land = null;
+  const toward = (x, z) => dir.set(x - p.x, 0, z - p.z).normalize();
+  const g = R(), n = g < 0.45 ? 1 : g < 0.75 ? 2 : 3 + (R() * 4 | 0);
+  const way = R();
+  if (way < 0.5) {         // straight in over the crop, passing over or just beside the line
+    p.set(rr(-45, 45), rr(9, 20), -rr(150, 170)); toward(rr(-15, 15), 130);
+  } else if (way < 0.85) { // quartering in from one side of the field, crossing the line on its way to the roost
+    const side = R() < 0.5 ? 1 : -1;
+    p.set(side * rr(60, 100), rr(8, 18), -rr(130, 155)); toward(-side * rr(5, 45), 130);
+  } else {                 // in from the front to drink at the pond on the left
+    p.set(rr(-50, 10), rr(10, 16), -rr(140, 160)); land = { x: F.pond.x + rr(-5, 5), z: F.pond.z + rr(-5, 5) }; toward(land.x, land.z);
+  }
+  const lat = new THREE.Vector3(-dir.z, 0, dir.x);
+  for (let i = 0; i < n; i++) {
+    const d = makeBird('dove', true);
+    d.g.position.copy(p).addScaledVector(dir, -(i ? rr(4, 9) * i : 0)) // strung out behind the leader.addScaledVector(lat, rr(-5, 5)); d.g.position.y += rr(-2.5, 2.5);
+    const jinks = [];
+    for (let j = 0, t = rr(0.3, 1.5); j < DOVE.jinks; j++, t += rr(...DOVE.every)) {
+      jinks.push({ t, yaw: rr(...DOVE.yaw) * (R() < 0.5 ? 1 : -1), dur: rr(...DOVE.dur), dip: rr(...DOVE.dip) });
+    }
+    const spd = rr(...DOVE.cruise);
+    flock.add(d, {
+      vel: dir.clone().multiplyScalar(spd), alive: true, down: false, ph: rr(0, TAU), life: 0, wob: rr(0, TAU), wf: rr(0.8, 1.6),
+      spd, hz: rr(...DOVE.beat), alt: d.g.position.y, jinks, spot: rr(...DOVE.spot), fyaw: rr(...DOVE.flare.yaw), fclimb: rr(...DOVE.flare.climb),
+      line, land: land && { x: land.x + rr(-4, 4), z: land.z + rr(-4, 4) }, bank: 0, flare: null, scare: false, landed: false,
+      clock: 0, acc: lag, yawNow: 0, dipNow: 0, glideNow: false, // the lag is flown on its own clock (see flight.js), not added here
+    }, true, 0);
+  }
 }

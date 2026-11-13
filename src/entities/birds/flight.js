@@ -1,12 +1,12 @@
 // How each quarry flies, and how a shot bird falls. Called once per bird per frame by the game.
 import * as THREE from 'three';
-import { quarryOf } from '../../config/gameplay.js';
+import { quarryOf, DOVE } from '../../config/gameplay.js';
 import { rnd, TAU } from '../../core/math.js';
 import { groundH } from '../../world/terrain.js';
 import { foldWings, poseWings, toCarcass, lay } from './bird.js';
 
 const UP = new THREE.Vector3(0, 1, 0), ahead = new THREE.Vector3();
-const FIELD_EDGE = 200; // m from the line; a bird past it has left the field
+const FIELD_EDGE = 200; // m from the line; a bird past it, flying on away, has left the field
 const faceAlong = d => d.g.lookAt(ahead.copy(d.g.position).add(d.vel));
 
 // One wingbeat pose for the procedural small birds: arm about `base` ± `amp`, the hand lagging behind it.
@@ -19,7 +19,8 @@ function beat(d, base, amp, hand) {
 // A live bird, one step. voice: the soundscape while a hunt is on (birds call), else null. True once it has left the field.
 export function fly(d, dt, voice) {
   const p = d.g.position;
-  if (d.kind === 'finch') {
+  if (d.kind === 'dove') dove(d, dt, voice);
+  else if (d.kind === 'finch') {
     // Bounding flight: a burst of quick wingbeats lifts the bird, then it tucks its wings and drops in an arc.
     // The heading weaves from side to side so the flock never flies a straight line.
     const flap = (d.life * d.bhz + d.wob) % 1 < 0.42;
@@ -48,7 +49,74 @@ export function fly(d, dt, voice) {
     for (const [a, b] of d.wings) { a.rotation.z = 0.12 + 0.62 * Math.sin(d.ph); b.rotation.z = 0.5 * Math.sin(d.ph - 1.1); }
     if (voice && Math.random() < dt * 0.05) voice.quack(p, rnd(0.5, 0.9)); // the flock keeps talking
   }
-  return Math.hypot(p.x, p.z) > FIELD_EDGE;
+  return d.landed || (Math.hypot(p.x, p.z) > FIELD_EDGE && p.x * d.vel.x + p.z * d.vel.z > 0); // (not one still coming in)
+}
+
+/* ---------- Mourning dove ----------
+   Fast (13–17 m/s) on steady, quick wingbeats, holding its line with a gentle weave, and every few seconds a jink —
+   a swerve, often dropping a little, sometimes lifting. The jinks are drawn when it is
+   spawned (game/spawner.js), seeded in a room, so every screen sees the same dodges. The first time it comes within its
+   spotting range of a hunter (or, hunting alone, is shot at) it flares: swings hard away from the gun, climbs and
+   puts on speed. Birds coming in to feed or drink set their wings and glide down onto the spot, and are gone once
+   down in the crop or at the water. Bird state (see spawner): spd, hz, alt, wob, wf, jinks [{ t, yaw, dur, dip }],
+   spot, fyaw, fclimb, line (hunters' x along z = 0), land ({ x, z } or null), bank, flare, scare, clock and acc (its fixed
+   clock: acc starts at the flight's lag), yawNow/dipNow/glideNow (the last step, for the pose); course (set here). */
+const { clamp } = THREE.MathUtils;
+const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
+// Dove flight runs on its own fixed clock (clock, acc), so every screen in a room steps it identically whatever its
+// frame rate: a flare or a jink caught a frame earlier on one screen would otherwise send its copy somewhere else.
+const DOVE_STEP = 1 / 120;
+function dove(d, dt, voice) {
+  d.acc += dt;
+  while (d.acc >= DOVE_STEP && !d.landed) { d.acc -= DOVE_STEP; doveStep(d, DOVE_STEP, voice); }
+  // Banked into the turn (left wing down to turn left), eased so a jink rolls it rather than snapping it over.
+  d.bank += (clamp(-d.yawNow * 0.5, -1.2, 1.2) - d.bank) * Math.min(1, dt * 9);
+  faceAlong(d); d.g.rotateZ(d.bank);
+  // Steady beats, quicker as it flares; wings set for the glide in; snapped half shut for a hard drop.
+  d.ph += dt * d.hz * TAU * (d.flare && d.clock - d.flare.t < 1.2 ? 1.3 : 1);
+  if (d.rig) {
+    const r = d.rig; r.fold += ((d.dipNow < -2.5 ? 0.55 : 0) - r.fold) * Math.min(1, dt * 14);
+    r.pose(d.glideNow ? 0.12 + 0.04 * Math.sin(d.clock * 9) : Math.sin(d.ph), r.fold);
+  } else if (d.glideNow) beat(d, 0.15, 0.03, 0.02);
+  else beat(d, 0.15, 0.85, 0.45);
+}
+function doveStep(d, dt, voice) {
+  const p = d.g.position, v = d.vel, t = (d.clock += dt);
+  if (d.flare) { // already flared: a shot (alone) only sends it into another jink
+    if (d.scare) d.jinks.push({ t, yaw: rnd(-0.4, 0.4), dur: 0.5, dip: rnd(-2, 0.5) });
+  } else {
+    let near = null, best = Infinity;
+    if (p.y < 28) for (const x of d.line) { const r = Math.hypot(p.x - x, p.z); if (r < best) { best = r; near = x; } }
+    if (d.scare || best < d.spot) { // swings away from the hunter it saw (+yaw turns left; side < 0: the hunter is on its left)
+      const side = Math.sign(v.x * (0 - p.z) - v.z * ((near ?? 0) - p.x)) || 1;
+      d.flare = { t, yaw: side * d.fyaw }; d.land = null; d.alt = p.y + d.fclimb;
+      voice?.whistle(p);
+    }
+  }
+  d.scare = false;
+
+  // It holds the line of its flyway (course), weaving about it and swinging back onto it after every jink.
+  const heading = Math.atan2(v.x, v.z);
+  d.course ??= heading;
+  let yaw = DOVE.weave * Math.sin(t * d.wf + d.wob), dip = 0, spd = d.spd, glide = false; // never quite straight
+  for (const j of d.jinks) if (t >= j.t && t < j.t + j.dur) { yaw += j.yaw / j.dur; dip += j.dip; }
+  if (d.flare) {
+    const k = t - d.flare.t;
+    if (k < 0.7) { yaw += d.flare.yaw / 0.7; dip += 2; } else if (!d.flare.on) { d.flare.on = true; d.course = heading; } // its new line, away from the gun
+    spd += DOVE.flare.speed * Math.min(1, k * 2);
+  }
+  if (!d.land && (!d.flare || d.flare.on)) yaw += clamp(wrap(d.course - heading) * 1.2, -0.9, 0.9);
+  if (d.land) { // turning onto the spot, then wings set, gliding down onto it
+    const dx = d.land.x - p.x, dz = d.land.z - p.z, dist = Math.hypot(dx, dz), ground = groundH(p.x, p.z);
+    yaw += clamp(wrap(Math.atan2(dx, dz) - heading) * 1.6, -1.4, 1.4);
+    if (dist < DOVE.landGlide) { glide = true; d.alt = ground + 0.3 + dist * 0.2; spd = Math.min(spd, 7 + dist * 0.18); }
+    if (dist < 2.5 || p.y < ground + 0.9) d.landed = true; // down in the crop, or at the water's edge
+  }
+  v.y += (clamp((d.alt - p.y) * 0.9, -5, 4) + dip - v.y) * Math.min(1, dt * 4);
+  v.applyAxisAngle(UP, yaw * dt); holdSpeed(v, spd, 1.5, dt);
+  p.addScaledVector(v, dt);
+  const floor = groundH(p.x, p.z) + 0.6; if (p.y < floor) { p.y = floor; v.y = Math.max(0, v.y); }
+  d.yawNow = yaw; d.dipNow = dip; d.glideNow = glide;
 }
 
 /* ---------- Shot birds ----------
@@ -61,9 +129,9 @@ export function fly(d, dt, voice) {
            the top and falls.
    glide — struck lightly by the fringe of a long-range pattern: it sets its wings and sails down at a shallow angle,
            to come down well beyond where it was hit (or die on the way). */
-const VT = { finch: 9, thrush: 12, duck: 22 };        // terminal speed of a limp bird, m/s
-const KNOCK = { finch: 2.2, thrush: 1.6, duck: 0.5 }; // m/s a close, full pattern adds along the line of the shot
-const SPIN = { finch: 1.4, thrush: 1, duck: 0.5 };    // light birds are set spinning harder
+const VT = { finch: 9, thrush: 12, dove: 13, duck: 22 };        // terminal speed of a limp bird, m/s
+const KNOCK = { finch: 2.2, thrush: 1.6, dove: 1.4, duck: 0.5 }; // m/s a close, full pattern adds along the line of the shot
+const SPIN = { finch: 1.4, thrush: 1, dove: 1, duck: 0.5 };    // light birds are set spinning harder
 const Z = new THREE.Vector3(0, 0, 1), loc = new THREE.Vector3(), axis = new THREE.Vector3(), fwd = new THREE.Vector3();
 const tq = new THREE.Quaternion(), rq = new THREE.Quaternion(), m4 = new THREE.Matrix4();
 const randomAxis = v => v.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).normalize();

@@ -39,7 +39,7 @@ export const logout = () => signOut(auth);
 
 /* ---------- leaderboards ----------
    leaderboards/{quarry}/scores/{uid}   { name, score, ducks (birds bagged), updatedAt }
-   One board per quarry (duck | finch | thrush), one document per player on each, holding only their best hunt there.
+   One board per quarry (duck | finch | thrush | dove | night), one document per player on each, holding only their best hunt there.
    (The single board from before quarry choice, scores/{uid}, is no longer read.) */
 const boardScores = quarry => collection(db, 'leaderboards', quarry, 'scores');
 
@@ -58,6 +58,8 @@ export async function topScores(quarry, n = 10) {
    rooms/{code}                         { members: [uid] (max 4), status: 'lobby'|'play', round, seed, slots: [uid], startAt, endAt,
                                           quarry, map, lamp (night: the lamper's uid), createdAt, touchedAt (last create/join/
                                           round start), closing (the last member is deleting it) }
+   The host is members[0]: the creator, then the longest-standing member once they leave. Only the host picks the quarry and
+   map (written here between rounds too, so everyone sees what comes next) and starts a round.
    Only rooms in use are kept: the last member to leave deletes the room and everything under it (wipeRoom), and rooms
    left by closed tabs are swept once untouched for STALE_MS. The leaderboards are never touched.
    rooms/{code}/players/{uid}           { name, weapon, role ('gun'|'lamp', night), score, ducks, round, yaw, pitch, shots, lamp?, joinedAt }
@@ -79,12 +81,15 @@ async function enter(code, user, weapon) {
   return snap.data().joinedAt.toMillis() - (t0 + t1) / 2;
 }
 
-export async function createRoom(user, weapon) {
+export const hostOf = room => room?.members?.[0];
+
+// quarry, map: what the room hunts first, the creator's current pick.
+export async function createRoom(user, weapon, quarry, map) {
   for (let i = 0; i < 5; i++) {
     const code = Array.from({ length: 5 }, () => CODE_CHARS[Math.random() * CODE_CHARS.length | 0]).join('');
     const made = await runTransaction(db, async tx => {
       if ((await tx.get(roomRef(code))).exists()) return false;
-      tx.set(roomRef(code), { members: [user.uid], status: 'lobby', round: 0, createdAt: serverTimestamp(), touchedAt: serverTimestamp() });
+      tx.set(roomRef(code), { members: [user.uid], status: 'lobby', round: 0, quarry, map, createdAt: serverTimestamp(), touchedAt: serverTimestamp() });
       return true;
     });
     if (made) { sweepRooms().catch(err => console.warn(err)); return { code, offset: await enter(code, user, weapon) }; }
@@ -159,6 +164,8 @@ export const startRound = (code, offset, seconds, quarry, map, firstOnly = false
   });
 });
 
+// The host's pick for the next round, shown to everyone in the lobby.
+export const setRoomHunt = (code, quarry, map) => updateDoc(roomRef(code), { quarry, map }).catch(err => console.warn(err));
 export const watchRoom = (code, cb, onErr) => onSnapshot(roomRef(code), s => cb(s.data()), onErr);
 export const watchPlayers = (code, cb) =>
   onSnapshot(collection(db, 'rooms', code, 'players'), s => cb(s.docs.map(d => ({ id: d.id, ...d.data() }))));

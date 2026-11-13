@@ -42,7 +42,7 @@ export function createInspector(camera, scene, flock, onChange) {
       // The scan is turned to show its upper side to the eye, head to the left; the mallard shows its back (green head,
       // blue speculum), head to the right; the others are turned breast up.
       if (held.scan) held.g.quaternion.setFromEuler(SCAN_FACE);
-      else held.g.rotation.set(0.25, Math.PI * 0.6, held.carcass ? Math.PI / 2 : Math.PI);
+      else held.g.rotation.set(0.25, Math.PI * 0.6, held.kind === 'duck' && held.carcass ? Math.PI / 2 : Math.PI);
       group.position.set(0.02, -0.1 - size * 0.1, -0.35 - size * 0.8); group.visible = true; onChange();
     },
     release() { if (held) api.toggle(); },

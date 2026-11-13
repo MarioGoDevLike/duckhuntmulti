@@ -9,6 +9,20 @@ export const WEAPONS = {
   double: { name: 'Field Over Under', type: 'Over-under 12 ga', desc: '2 shells · instant second barrel · breaks open and reloads both', mag: 2, interval: 0.12, reload: 1.3, single: false },
 };
 
+// Screw-in chokes: how tightly the barrel holds the shot together. spread: × how fast the pattern widens with range ·
+// reach: × how far it stays dense enough to kill (the quarry's reach and fade). 2 is the game's original pattern.
+// Numbered as on real barrels (the stars stamped on Italian chokes): 1 is the tightest and kills furthest, 3 the most
+// open. Tight is small and precise but reaches much further; open is forgiving close and thins out early.
+export const CHOKES = {
+  1: { name: 'Tight', line: 'Small pattern · long shots', spread: 0.65, reach: 1.2 },
+  2: { name: 'Medium', line: 'All-round pattern', spread: 1, reach: 1 },
+  3: { name: 'Open', line: 'Wide pattern · close birds', spread: 1.5, reach: 0.8 },
+};
+// The chokes each gun starts with, one per barrel: the over-under fires its bottom barrel first, then the top.
+export const DEFAULT_CHOKES = { semi: ['2'], double: ['2', '2'] };
+// A gun's chokes from a saved pick, falling back to its defaults for anything missing or unknown.
+export const chokesFor = (weapon, picked) => (DEFAULT_CHOKES[weapon] || DEFAULT_CHOKES.semi).map((d, i) => (CHOKES[picked?.[i]] ? picked[i] : d));
+
 // What is being hunted. hitR/reach/fade: how big the bird is to the shot column and how fast the pattern thins
 // with range; pts: score multiplier; rest: how high a procedural bird sits when down;
 // upturn: laid breast up in the bag; gap: seconds between flights; bag: how the birds are laid out on the grass.
@@ -19,6 +33,12 @@ export const QUARRY = {
            hitR: 0.15, reach: 46, fade: 16, pts: 1.6, rest: 0.05, upturn: true, gap: [6, 9], bag: { cols: 8, dx: 0.24, dz: 0.42, front: -1.8 } },
   thrush: { kind: 'thrush', name: 'Thrush', line: 'Bursts from the woods, one by one', speed: 5, skill: 4, desc: 'Summan · bursts out of the trees one at a time · fast, direct flight', one: 'thrush', many: 'thrushes',
             hitR: 0.19, reach: 52, fade: 18, pts: 1.3, rest: 0.06, upturn: true, gap: [1.4, 3.2], bag: { cols: 6, dx: 0.32, dz: 0.55, front: -2.0 } },
+  // wave: [period s, depth]: flights come in waves, the gap between them swinging ±depth over each period.
+  // limit: the daily bag limit (the hunt goes on, but the hunter is told when it is filled).
+  dove: { kind: 'dove', name: 'Mourning Dove', line: 'Fast passes in over a sunflower field', speed: 5, skill: 4,
+          desc: 'Pass shooting · 30–40 mph, incoming over the field · flares when it spots you · 15-bird limit', one: 'dove', many: 'doves',
+          hitR: 0.27, reach: 52, fade: 17, pts: 1.5, rest: 0.08, upturn: true, gap: [2.4, 5.6], wave: [38, 0.7], limit: 15,
+          bag: { cols: 5, dx: 0.42, dz: 0.75, front: -2.0 } },
   // Night lamping in the olive terraces: rooms only, one hunter holds the lamp and the others shoot (see game/night.js).
   night: { kind: 'night', bird: 'thrush', night: true, roomOnly: true, name: 'Night Thrush', line: 'Thrushes over the projectors, in the lamp', speed: 2, skill: 5,
            desc: 'Dujj at night · one hunter holds the lamp on the bird, the others shoot · 2+ hunters', one: 'thrush', many: 'thrushes',
@@ -45,6 +65,18 @@ export const NIGHT = {
   spotDrain: 1.7,
   findR: 60, findT: 1.1,       // a downed bird is found once the lamp has held it this long (s) from within findR m
   pts: 100,                    // team points per bird found
+};
+// How a mourning dove flies (entities/birds/flight.js, game/spawner.js). Ranges are [min, max], drawn per bird.
+export const DOVE = {
+  cruise: [13, 17],          // m/s, 29–38 mph; a flared dove puts on `flare.speed` more
+  beat: [5.5, 6.5],          // wingbeats a second, steady: a dove flaps nearly all the time
+  weave: 0.08,               // rad/s of gentle side-to-side drift about its line
+  // Jinks: now and then a swerve, a turn of `yaw` rad (either way) and a drop or lift of `dip` m/s, over `dur` s, every
+  // `every` s. Drawn when the bird is spawned (seeded in a room), so every screen sees the same dodges.
+  jinks: 8, every: [1.8, 4], yaw: [0.08, 0.35], dur: [0.4, 0.8], dip: [-1.8, 0.8],
+  spot: [14, 24],            // m from a hunter at which it sees the line and flares
+  flare: { climb: [3, 5], speed: 2.5, yaw: [0.25, 0.6] },
+  landGlide: 50,             // m out from where it lands that it sets its wings and glides in
 };
 // Player settings (menu Settings tab) and their defaults: volume 0–1, look sensitivity ×, field of view in degrees.
 export const SETTINGS = { volume: 0.8, sensitivity: 1, fov: 55 };

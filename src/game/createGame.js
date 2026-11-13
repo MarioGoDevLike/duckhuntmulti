@@ -5,10 +5,10 @@
 //
 // States: 'menu' (drifting view, ambient birds) → 'play' (a hunt, solo or in a room) → 'over' (the bag) → 'menu'.
 import * as THREE from 'three';
-import { WEAPONS, QUARRY, NIGHT, EYE, PITCH_MIN, PITCH_MAX, slotX, roundTime } from '../config/gameplay.js';
+import { WEAPONS, QUARRY, NIGHT, EYE, PITCH_MIN, PITCH_MAX, slotX, roundTime, CHOKES, chokesFor } from '../config/gameplay.js';
 import { MENU_MAP, mapOf } from '../config/maps.js';
 import { TOUCH } from '../config/platform.js';
-import { rnd, mulberry } from '../core/math.js';
+import { rnd, mulberry, TAU } from '../core/math.js';
 import { createAudio } from '../audio/soundscape.js';
 import { createEnvironment } from '../world/environment.js';
 import { fly, fall, startFall } from '../entities/birds/flight.js';
@@ -24,6 +24,8 @@ import { createBag } from './bag.js';
 import { createInspector } from './inspector.js';
 import { createInput } from './input.js';
 import { createNight } from './night.js';
+// SHOTCAM OFF (for now, while we check it is not what slows the game): 
+// import { createShotcam } from './shotcam.js';
 
 const { clamp } = THREE.MathUtils;
 
@@ -42,7 +44,7 @@ export function createGame(canvas, cb) {
   const settings = { volume: 1, sensitivity: 1, fov: 55 }; // see App's Settings tab
   let yaw = 0, pitch = 0.16, kick = 0, aim = false, ads = 0, brk = 0, menuSpawnT = 1;
   // The round. mp: { seed, startAt (local ms), slot, count } while hunting in a room; R drives the flights, seeded in a room.
-  let W = WEAPONS.semi, Q = QUARRY.duck, map = MENU_MAP, mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, poseT = 0;
+  let W = WEAPONS.semi, chokes = chokesFor('semi'), Q = QUARRY.duck, map = MENU_MAP, mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, poseT = 0;
   // Night: role 'lamp' | 'gun' | 'both' (a solo test night) · lampState: our lamp, if we hold it · peers: the others' poses.
   let role = 'gun', lampSlot = -1, peers = [], kills = 0;
   const lampState = { on: false, spot: false, red: false, bat: 1 };
@@ -66,6 +68,7 @@ export function createGame(canvas, cb) {
   });
   const inspector = createInspector(camera, scene, flock, () => hud());
   const lamp = createLamp(scene, camera);
+  // const shotcam = createShotcam(renderer, scene, view.rig); // SHOTCAM OFF
   const night = createNight({
     flock, lamp, audio: () => (state === 'play' ? audio : null),
     onEvent: ev => cb.onNightEvent?.(ev),
@@ -75,15 +78,19 @@ export function createGame(canvas, cb) {
     },
   });
 
+  // The barrel the next shot leaves: the semi has one; the over-under fires its bottom barrel, then the top.
+  const barrel = () => (W.single ? 0 : Math.min(chokes.length - 1, Math.max(0, W.mag - shells)));
   const hud = () => cb.onHud({
-    score, ducks: bagged, shells, mag: W.mag, reloading, aiming: aim, time: Math.ceil(timeLeft), total: RT,
+    score, ducks: bagged, shells, mag: W.mag, reloading, aiming: aim, choke: chokes[barrel()], time: Math.ceil(timeLeft), total: RT,
     canGrab: inspector.canGrab, holding: inspector.holding,
     night: Q.night ? { role, lamp: { ...lampState, bat: Math.round(lampState.bat * 100) / 100 }, kills, ...night.stats } : null,
   });
   let nightHudT = 0;
 
   /* ---------- rules ---------- */
-  const spawn = (lag = 0) => spawnFlight({ Q, map, R, flock, lag, facing: mp ? 0 : yaw, voice: state === 'play' ? audio : null });
+  // line: where the hunters stand (doves flare on seeing them); in a room every slot, so all screens agree.
+  const line = () => (mp ? Array.from({ length: mp.count }, (_, i) => slotX(i, mp.count)) : [camera.position.x]);
+  const spawn = (lag = 0) => spawnFlight({ Q, map, R, flock, lag, facing: mp ? 0 : yaw, voice: state === 'play' ? audio : null, line: line() });
 
   // hit: how the shot took it (see shotColumn), or null for a bird another hunter dropped. Returns how it comes down.
   function drop(d, hit = null) {
@@ -96,14 +103,15 @@ export function createGame(canvas, cb) {
   const HOW = { fold: 'clean', wing: 'wing hit', tower: 'towered', glide: 'hit light' };
   function kill(d, range, hit) {
     if (Q.night) { // at night a bird only counts once it has been found on the ground with the lamp
-      kills++; drop(d, hit); killLog.set(d.id, 'me'); lastKill = T;
+      kills++; drop(d, hit); killLog.set(d.id, 'me'); lastKill = T; /* shotcam.kill(); SHOTCAM OFF */
       cb.onMsg('Down · ' + (range | 0) + ' m — light it on the ground to find it'); hud();
       cb.onKill?.(d.id, 0);
       return;
     }
     const speed = d.vel.length(), dbl = T - lastKill < 1.5; lastKill = T;
-    const pts = Math.round((40 + range * 2 + speed * 3) * Q.pts * (dbl ? 2 : 1)); score += pts; bagged++;
-    const how = drop(d, hit); cb.onMsg(`${dbl ? 'DOUBLE!  ' : ''}+${pts}  ·  ${range | 0} m  ·  ${HOW[how]}`); hud();
+    const pts = Math.round((40 + range * 2 + speed * 3) * Q.pts * (dbl ? 2 : 1)); score += pts; bagged++; /* shotcam.kill(); SHOTCAM OFF */
+    const limit = Q.limit && bagged === Q.limit ? `  ·  limit filled: ${Q.limit} ${Q.many}` : '';
+    const how = drop(d, hit); cb.onMsg(`${dbl ? 'DOUBLE!  ' : ''}+${pts}  ·  ${range | 0} m  ·  ${HOW[how]}${limit}`); hud();
     killLog.set(d.id, 'me');
     cb.onKill?.(d.id, pts); // in a room: claim the bird (first claim wins)
   }
@@ -113,12 +121,14 @@ export function createGame(canvas, cb) {
     if (inspector.holding) return; // hands full
     if (T < nextShot || elapsed < 0 || (reloading && !W.single)) return; // countdown, or a broken-open double
     if (shells <= 0) { audio.empty(); wantReload(); return; }
+    const choke = CHOKES[chokes[barrel()]];
     reloading = false; reloadT = 0; shells--; shots++; nextShot = T + W.interval; kick = 1;
-    view.fire(W, shells); audio.shot(W.single);
-    shotColumn.fire(camera.position.clone(), camera.getWorldDirection(new THREE.Vector3()));
+    view.fire(W, shells); audio.shot(W.single); /* shotcam.shot(); SHOTCAM OFF */
+    shotColumn.fire(camera.position.clone(), camera.getWorldDirection(new THREE.Vector3()), choke);
     // Birds flare at the shot. Solo only: in a room every screen must fly identical birds, and a random
-    // flare from one hunter's gun would send their copies somewhere else on everyone else's screen.
-    if (!mp && !Q.night) for (const d of flock.birds) if (d.alive) d.vel.y += rnd(0.3, 1.6);
+    // flare from one hunter's gun would send their copies somewhere else on everyone else's screen. (In a room
+    // doves still flare, on every screen alike, when they come close enough to see the line: see flight.js.)
+    if (!mp && !Q.night) for (const d of flock.birds) if (d.alive) { if (d.kind === 'dove') d.scare = true; else d.vel.y += rnd(0.3, 1.6); }
     if (Q.night) night.spook(); // every bird in the air takes fright and climbs (on every screen)
     hud(); if (mp) pose();
   }
@@ -127,6 +137,7 @@ export function createGame(canvas, cb) {
   function toggleLamp() { if (!holdsLamp() || elapsed < 0) return; lampState.on = !lampState.on && lampState.bat > 0; audio?.click(); hud(); if (mp) pose(); }
   function lampMode(k) { if (!holdsLamp()) return; lampState[k] = !lampState[k]; audio?.click(); hud(); if (mp) pose(); }
   function onKey(code) {
+    // SHOTCAM OFF: if (code === 'KeyS' && state === 'play') { cb.onMsg('Saving shotcam…'); shotcam.save().then(m => cb.onMsg(m), e => cb.onMsg('Shotcam failed: ' + e.message)); return; }
     if (!Q.night || state !== 'play') return;
     if (/^Digit[1-4]$/.test(code)) cb.onCall?.(+code.slice(5));
     else if (code === 'KeyF') lampMode('red');
@@ -171,7 +182,8 @@ export function createGame(canvas, cb) {
     // Flight schedule runs off the round clock (seeded in a room), so it is identical for every player.
     else while (elapsed >= nextSpawn) {
       const lag = elapsed - nextSpawn; spawn(lag);
-      nextSpawn += (rr(...Q.gap) - 1.2 * Math.min(1, nextSpawn / RT)) / (mp ? 1 + 0.25 * (mp.count - 1) : 1);
+      const wave = Q.wave ? 1 + Q.wave[1] * Math.sin(nextSpawn * TAU / Q.wave[0]) : 1; // busy spells and lulls
+      nextSpawn += (rr(...Q.gap) - 1.2 * Math.min(1, nextSpawn / RT)) * wave / (mp ? 1 + 0.25 * (mp.count - 1) : 1);
     }
     if (mp && (poseT -= dt) <= 0) { poseT = mp.poseEvery || 0.5; pose(); }
   }
@@ -263,6 +275,7 @@ export function createGame(canvas, cb) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (!paused || mp) step(dt); // a room's hunt keeps running while one player sits in the pause menu
     audio?.listen(camera);
+    // SHOTCAM OFF: shotcam.capture(dt, camera, state === 'play'); // renders its own view first; the game's render paints over it
     renderer.render(scene, camera);
   }
 
@@ -285,20 +298,20 @@ export function createGame(canvas, cb) {
   addEventListener('resize', onResize);
   onResize(); raf = requestAnimationFrame(frame);
   // Development builds only: a handle for tuning from the console (look somewhere, inspect the birds and the night).
-  if (import.meta.env.DEV) window.__hunt = { flock, night, lamp, camera, renderer, scene, look(y, p) { yaw = y; pitch = p; }, step, fire, get hud() { return { score, bagged, kills, shells }; } };
+  if (import.meta.env.DEV) window.__hunt = { flock, night, lamp, /* shotcam, SHOTCAM OFF */ camera, renderer, scene, look(y, p) { yaw = y; pitch = p; }, step, fire, get hud() { return { score, bagged, kills, shells }; } };
 
   /* ---------- public API ---------- */
   return {
     // room (optional): { seed, startAt: local ms when the round begins, slot, count, quarry, map, poseEvery? (s between
     // pose updates), and at night role ('lamp' | 'gun') and lampSlot }. A room's quarry and map win. A night hunt
-    // without a room is a test night: we hold both the lamp and a gun.
-    start(weapon, room, quarry, mapId) {
+    // without a room is a test night: we hold both the lamp and a gun. choke: the choke picked for each barrel ('1'…'3').
+    start(weapon, room, quarry, mapId, choke) {
       inspector.release();
       Q = QUARRY[room?.quarry || quarry] || QUARRY.duck; RT = roundTime(Q.kind);
       map = mapOf(room ? room.map : mapId, Q.kind); world.setMap(map);
       audio ||= createAudio(settings.volume); audio.resume();
-      W = WEAPONS[weapon] || WEAPONS.semi; view.equip(W); brk = 0;
-      flock.reset(); shotColumn.clear(); hunters.clear(); bag.clear(); killLog.clear(); peers = [];
+      W = WEAPONS[weapon] || WEAPONS.semi; chokes = chokesFor(WEAPONS[weapon] ? weapon : 'semi', choke); view.equip(W); brk = 0;
+      flock.reset(); shotColumn.clear(); /* shotcam.clear(); SHOTCAM OFF */ hunters.clear(); bag.clear(); killLog.clear(); peers = [];
       mp = room || null; R = mp ? mulberry(mp.seed) : Math.random;
       elapsed = mp ? (Date.now() - mp.startAt) / 1000 : 0; nextSpawn = 1.5; timeLeft = RT - elapsed; lastSec = 0;
       role = Q.night ? (room?.role || 'both') : 'gun'; lampSlot = room?.lampSlot ?? -1; kills = 0;

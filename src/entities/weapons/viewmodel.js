@@ -125,6 +125,7 @@ export function createViewmodel(camera) {
 
   return {
     flashMaterial: flash.material, // the other hunters' guns flash with the same sprite
+    rig: gun, // the whole gun in hand (hidden for the barrel-mounted shotcam's view)
     equip(W) {
       equipped = W.single ? slots.single : slots.double;
       for (const s of Object.values(slots)) { s.group.visible = s === equipped; s.shells.forEach(m => { m.visible = false; }); }

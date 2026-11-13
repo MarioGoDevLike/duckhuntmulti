@@ -14,6 +14,7 @@ import { makeBeam, aimBeam } from '../core/beam.js';
 import { hills } from './terrain.js';
 import { loadModel } from '../core/gltf.js';
 import oakUrl from '../assets/models/oak.glb?url';
+import doveFieldUrl from '../assets/models/dove_field.glb?url';
 import nightSkyUrl from '../assets/images/night_sky.webp?url';
 
 const { smoothstep } = THREE.MathUtils;
@@ -341,4 +342,159 @@ function field(tex) {
   };
 }
 
-export const BUILD = { lake, oakRide, pineRidge, clearing, field };
+/* ---------- Sunflower Field: mourning doves on a September afternoon ----------
+   A sunflower field part harvested: the hunters stand in the cut strip along its edge (stubble and cut stalks), the
+   standing crop beyond, a power line across it, dead snags the doves sit in, a stock pond off to the left and the
+   roost trees behind the line. The props are Blender models (art-source/blender/dove_field.py → dove_field.glb),
+   planted once they load; the far crop is painted rows that show at once. The layout is fixed (the doves' flyways in
+   game/spawner.js follow it), and drawn from a fixed seed so every screen in a room sees the same field. */
+export const DOVE_FIELD = {
+  crop: -24,                               // z where the standing sunflowers start (the cut strip is nearer)
+  pond: { x: -72, z: -6, r: 15 },          // the stock pond
+  line: -58,                               // z of the power line, poles every `span` m
+  span: 45,
+  snags: [[34, -31, 1], [-112, -66, 0.9], [128, -14, 1.1]], // dead trees: x, z, scale
+};
+const fieldProps = loadModel(doveFieldUrl, 'Dove field').then(gl => {
+  if (!gl) return null;
+  gl.scene.updateMatrixWorld(true);
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const out = {};
+  for (const n of ['Sunflower', 'Stalk', 'Pole', 'Snag', 'Post']) {
+    const o = gl.scene.getObjectByName(n); if (!o?.isMesh) { console.warn('Dove field model incomplete'); return null; }
+    out[n] = [o.geometry.clone().applyMatrix4(o.matrixWorld), mat];
+  }
+  return out;
+});
+// Resolves once the map props have loaded or given up; the boot loader waits for it before drawing the map pictures.
+export const mapModelsReady = fieldProps;
+
+// The standing crop seen from far off: rows of painted sunflowers (stalks, leaves, nodding heads) on long cards facing
+// the line. Cheap enough to fill the field to the horizon.
+function cropTexture() {
+  const t = canvasTex(512, 128, (g, W, H) => {
+    const R = mulberry(77);
+    for (let i = 0; i < 46; i++) {
+      const x = R() * W, top = H * (0.08 + R() * 0.2), lean = (R() - 0.5) * 6;
+      g.strokeStyle = `hsl(${55 + R() * 25},${30 + R() * 15}%,${22 + R() * 10}%)`; g.lineWidth = 2.2;
+      g.beginPath(); g.moveTo(x, H); g.lineTo(x + lean, top); g.stroke();
+      for (let k = 0; k < 4; k++) { // leaves
+        const y = H - (H - top) * (0.2 + k * 0.2), s = k % 2 ? 1 : -1;
+        g.fillStyle = `hsl(${k < 2 ? 35 : 75},${30 + R() * 10}%,${16 + R() * 8}%)`;
+        g.beginPath(); g.ellipse(x + s * 7, y, 8, 3.5, s * 0.5, 0, TAU); g.fill();
+      }
+      g.fillStyle = `hsl(${36 + R() * 10},${55 + R() * 20}%,${30 + R() * 14}%)`; // dried petals round the dark head
+      g.beginPath(); g.ellipse(x + lean, top + 2, 9, 6, 0, 0, TAU); g.fill();
+      g.fillStyle = `hsl(25,40%,${8 + R() * 6}%)`; g.beginPath(); g.ellipse(x + lean, top + 3, 6, 4, 0, 0, TAU); g.fill();
+    }
+  });
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
+// A sagging wire from a to b (catenary as a parabola), pushed onto pts as line-segment pairs.
+function wire(pts, a, b, sag, n = 14) {
+  for (let i = 0; i < n; i++) for (const t of [i / n, (i + 1) / n]) {
+    pts.push(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t - 4 * sag * t * (1 - t), a.z + (b.z - a.z) * t);
+  }
+}
+
+function doveField(tex) {
+  const group = new THREE.Group(), F = DOVE_FIELD, R = mulberry(20261113), rr = (a, b) => a + R() * (b - a);
+  const pondD = (x, z) => Math.hypot(x - F.pond.x, z - F.pond.z);
+  const height = (x, z) => {
+    const d = pondD(x, z);
+    return hills(x, z) + 0.25 * Math.sin(x * 0.05) * Math.cos(z * 0.04) * smoothstep(Math.hypot(x, z), 10, 40)
+      - 1.8 * (1 - smoothstep(d, F.pond.r * 0.7, F.pond.r * 1.05))                                  // the pond
+      + 1.1 * (1 - smoothstep(Math.abs(d - F.pond.r * 1.3), 0, 4)) * smoothstep(d, F.pond.r, F.pond.r * 1.15); // its bank
+  };
+  ground(group, tex, height, (x, z, h, n) => (h < -0.25 ? [0.1, 0.3, 0.26 + n * 0.08]   // pond mud
+    : z < F.crop ? [0.08, 0.38, 0.24 + n * 0.08]                                          // bare earth under the crop
+      : [0.11, 0.38, 0.5 + 0.1 * Math.sin(x * 4.1) + n * 0.12]));                         // stubble, rows of cut stalks
+
+  const water = new THREE.Mesh(new THREE.CircleGeometry(F.pond.r * 1.08, 40).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: 0x4a5a4a, roughness: 0.15, metalness: 0.8 }));
+  water.position.set(F.pond.x, -0.3, F.pond.z); group.add(water);
+  plant(group, height, [[REED, lambert()]], 420, () => { // cattails round the pond, open on the side facing the line
+    const a = rr(0, TAU), r = F.pond.r * rr(0.95, 1.12);
+    return Math.cos(a) > 0.55 ? null : { x: F.pond.x + Math.cos(a) * r, z: F.pond.z + Math.sin(a) * r, s: 1, sy: rr(0.6, 1), rx: rr(-0.1, 0.1), rz: rr(-0.1, 0.1), hsl: [rr(0.1, 0.15), 0.4, rr(0.3, 0.42)] };
+  });
+
+  // The far crop: painted rows from where the planted plants end to the far hedge, each row in 60 m lengths.
+  const NEAR = TOUCH ? 34 : 46; // m of planted sunflowers past the crop edge; painted rows beyond
+  const cropMat = new THREE.MeshLambertMaterial({ map: cropTexture(), alphaTest: 0.5, side: THREE.DoubleSide });
+  cropMat.map.repeat.set(60 / 22, 1); // a 22 m stretch of painted plants per texture repeat
+  const rows = [];
+  for (let z = F.crop - NEAR; z > -250; z -= 2.2) rows.push(z);
+  const strips = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1.9).translate(0, 0.95, 0), cropMat, rows.length * 6);
+  let k = 0;
+  for (const z of rows) for (let s = 0; s < 6; s++) {
+    const x = -150 + s * 60;
+    m.position.set(x, height(x, z) - 0.05, z); m.rotation.set(0, 0, 0); m.scale.set(60, rr(0.9, 1.08), 1); m.updateMatrix();
+    strips.setMatrixAt(k, m.matrix); strips.setColorAt(k++, col.setHSL(0.12, 0.2, rr(0.75, 1)));
+  }
+  group.add(strips);
+
+  // A hedge closing the far side of the field, the roost oaks behind the line, woods on the hills.
+  plant(group, height, [[new THREE.IcosahedronGeometry(2.4, 1).scale(1.3, 1, 1).translate(0, 1.9, 0), lambert()]], 220, i => {
+    const x = -300 + i * 2.8 + rr(-0.6, 0.6); return { x, z: -258 + Math.sin(x * 0.02) * 4, s: rr(0.9, 1.4), hsl: [rr(0.2, 0.27), 0.35, rr(0.16, 0.24)] };
+  });
+  upgradeOaks(group, oaks(group, height, 64, i => ({ x: -190 + i * 6 + rr(-2, 2), z: rr(30, 44) })));
+  oaks(group, height, 40, () => ({ x: rr(-200, 200), z: rr(50, 75) }));
+  horizon(group, height, 900, 300, 640);
+
+  // Fence posts and two strands along the crop edge; the power line across the field. Wires are drawn here; the
+  // posts, poles, snags, near crop and cut stalks are the Blender props, placed once they load.
+  const pts = [], postAt = [], poles = [];
+  for (let x = -150; x <= 150; x += 3.2) postAt.push([x + rr(-0.2, 0.2), F.crop + 2.5 + rr(-0.15, 0.15)]);
+  for (let i = 1; i < postAt.length; i++) for (const y of [0.6, 1.05]) {
+    const [x0, z0] = postAt[i - 1], [x1, z1] = postAt[i];
+    wire(pts, new THREE.Vector3(x0, height(x0, z0) + y, z0), new THREE.Vector3(x1, height(x1, z1) + y, z1), 0.04, 2);
+  }
+  for (let x = -315; x <= 315; x += F.span) poles.push([x, F.line]);
+  for (let i = 1; i < poles.length; i++) for (const [dx, y] of [[-1.05, 8.6], [0, 9.14], [1.05, 8.6]]) { // the insulator tops (dove_field.py)
+    const [x0, z0] = poles[i - 1], [x1, z1] = poles[i];
+    wire(pts, new THREE.Vector3(x0 + dx, height(x0, z0) + y, z0), new THREE.Vector3(x1 + dx, height(x1, z1) + y, z1), 0.9);
+  }
+  const wires = new THREE.BufferGeometry(); wires.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  group.add(new THREE.LineSegments(wires, new THREE.LineBasicMaterial({ color: 0x23211d })));
+
+  const spots = { // drawn now, so the layout is the same whenever the model arrives
+    Sunflower: [], Stalk: [],
+    Post: postAt.map(([x, z]) => ({ x, z, s: 1, sy: rr(0.9, 1.05), yaw: rr(0, TAU), rx: rr(-0.05, 0.05), rz: rr(-0.05, 0.05) })),
+    Pole: poles.map(([x, z]) => ({ x, z, s: 1, yaw: 0, rz: rr(-0.02, 0.02) })),
+    Snag: F.snags.map(([x, z, s]) => ({ x, z, s, yaw: rr(0, TAU) })),
+  };
+  for (let z = F.crop - 0.5; z > F.crop - NEAR; z -= 0.95) { // rows across the view, plants ~1 m apart in the row
+    const w = 70 + (F.crop - z) * 2.2;
+    for (let x = -w; x < w; x += rr(0.85, 1.25)) {
+      if (R() < 0.06) continue; // a gap where a plant failed
+      // The heads face the line (+z, as modelled), each turned a little its own way.
+      spots.Sunflower.push({ x: x + rr(-0.2, 0.2), z: z + rr(-0.15, 0.15), s: rr(0.85, 1.12), sy: rr(0.88, 1.12), yaw: rr(-0.5, 0.5), rx: rr(-0.06, 0.06), rz: rr(-0.06, 0.06) });
+    }
+  }
+  for (let z = F.crop + 1; z < 14; z += 0.9) for (let x = -60; x < 60; x += rr(0.8, 1.3)) {
+    if (x > -4 && x < 6 && z > -7 && z < 2.5) continue; // clear where the hunter stands and the bag is laid
+    spots.Stalk.push({ x: x + rr(-0.2, 0.2), z: z + rr(-0.2, 0.2), s: rr(0.8, 1.2), sy: rr(0.6, 1.3), yaw: rr(0, TAU), rx: rr(-0.25, 0.25), rz: rr(-0.25, 0.25) });
+  }
+  fieldProps.then(P => {
+    if (!P) return;
+    for (const [name, list] of Object.entries(spots)) {
+      const me = new THREE.InstancedMesh(...P[name], list.length);
+      list.forEach((s, i) => {
+        m.position.set(s.x, height(s.x, s.z), s.z); m.rotation.set(s.rx || 0, s.yaw, s.rz || 0, 'YXZ');
+        m.scale.set(s.s, s.s * (s.sy ?? 1), s.s); m.updateMatrix(); me.setMatrixAt(i, m.matrix);
+      });
+      group.add(me);
+    }
+    m.rotation.order = 'XYZ';
+  });
+
+  return {
+    group, height, water: -0.3, grass: (x, z, h) => h > -0.2 && z > F.crop, grassScale: 0.28, grassTint: 0xe8cf8a,
+    reachable: p => p.z > F.crop - 40 && pondD(p.x, p.z) > F.pond.r * 0.9, // the dog works the strip and the crop's edge
+    light: { sun: [72, 32], sky: [6, 1.6, 0.005, 0.85], hemi: [0xd2dcef, 0x8a7448, 1.6], sunColor: 0xffd7a0, sunI: 2.9, fog: [0xd8cfb8, 0.0026] },
+  };
+}
+
+export const BUILD = { lake, oakRide, pineRidge, clearing, field, doveField };

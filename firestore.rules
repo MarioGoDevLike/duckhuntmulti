@@ -14,7 +14,7 @@ service cloud.firestore {
     match /leaderboards/{quarry}/scores/{uid} {
       allow read: if signedIn();
       allow create, update: if signedIn() && request.auth.uid == uid
-        && quarry in ['duck', 'finch', 'thrush', 'night']
+        && quarry in ['duck', 'finch', 'thrush', 'dove', 'night']
         && request.resource.data.keys().hasOnly(['name', 'score', 'ducks', 'updatedAt'])
         && request.resource.data.score is int && request.resource.data.ducks is int;
     }

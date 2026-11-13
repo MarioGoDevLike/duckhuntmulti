@@ -7,6 +7,8 @@ import { loadModel, prepareModel, findBone } from '../../core/gltf.js';
 import chaffinchScanUrl from '../../assets/models/chaffinch.glb?url';
 import thrushModelUrl from '../../assets/models/thrush_3D.glb?url';
 import mallardModelUrl from '../../assets/models/duck_3d.glb?url';
+import doveFlightUrl from '../../assets/models/mourning_dove_-_in_flight.glb?url';
+import dovePerchedUrl from '../../assets/models/mourning_dove.glb?url';
 
 /* ---------- Chaffinch: photogrammetry scan, downed birds only ---------- */
 // "Dead Chaffinch" by b-unicycling, a scan of a male lying on bark mulch. assets/models/chaffinch.glb is the bird cut
@@ -27,20 +29,37 @@ const mallardReady = loadModel(mallardModelUrl, 'Mallard').then(gl => {
 });
 export const makeMallardModel = () => mallard?.clone() ?? null;
 
-/* ---------- Thrush: rigged, flies ---------- */
-// "Swainson's Thrush - in Flight" by osuecampus: a skinned thrush with a wingbeat clip. The clip is keyed as four
-// held poses (stop-motion when played), so three of them are sampled — wings up, spread, down — and the wings are
-// driven by blending between them, plus a folded pose built here for closed-wing dips and birds on the ground.
-// Bird space as makeThrush: facing +z, centred on the body, ~0.43 long and ~0.66 across the spread wings.
-const THRUSH_SCALE = 0.185, WING_BONES = ['wingLength01', 'wingLength02', 'wingLength03'];
-let thrushRig = null;
-const thrushReady = loadModel(thrushModelUrl, 'Thrush').then(gl => {
-  if (!gl) return;
+/* ---------- Thrush and mourning dove: rigged, fly ---------- */
+// "Swainson's Thrush - in Flight" and "Mourning Dove - in Flight" by osuecampus: skinned birds on the same rig, each
+// with a wingbeat clip. Three poses are sampled from the clip — wings up, spread, down — and the wings are driven by
+// blending between them, plus a folded pose built here for closed-wing dips and birds on the ground. keys: the clip
+// times of those three poses (the thrush's, set by hand), or 'auto' to find the top and bottom of the stroke from the
+// wingtip's height (the dove's clip beats three times a loop). Bird space as makeThrush: facing +z, centred on the body.
+// fit: { scale, at } places the model by hand (the thrush: ~0.43 long, ~0.66 across the spread wings);
+//      { span } scales it to that wingspan and centres it on its spread pose. shade (optional): × its colour.
+const WING_BONES = ['wingLength01', 'wingLength02', 'wingLength03'];
+const DOVE_SPAN = 0.72; // m across the dove's spread wings
+const loadFlyer = (url, what, fit) => loadModel(url, what).then(gl => {
+  if (!gl) return null;
   const root = gl.scene; prepareModel(root, THREE.DoubleSide); root.updateMatrixWorld(true);
+  if (fit.shade) root.traverse(o => { if (o.isMesh) { o.material.color.multiplyScalar(fit.shade); o.material.envMapIntensity = 0.2; } });
   const bones = ['r', 'l'].flatMap(s => WING_BONES.map(n => findBone(root, `${n}_${s}_`)));
+  if (bones.some(b => !b)) { console.warn(`${what} model has an unexpected rig; using the procedural stand-in`); return null; }
   const mixer = new THREE.AnimationMixer(root), act = mixer.clipAction(gl.animations[0]); act.play();
   const sample = t => { mixer.setTime(t); return bones.map(b => b.quaternion.clone()); };
-  const UP = sample(0), MID = sample(0.25), DOWN = sample(0.5);
+  let keys = fit.keys;
+  if (keys === 'auto') { // the wingtip's height over the shoulder through one loop: highest is up, lowest down, level between
+    const tip = findBone(root, 'wingLength03_r_'), sh = findBone(root, 'shoulder_r_'), a = new THREE.Vector3(), b = new THREE.Vector3();
+    const hs = [];
+    for (let t = 0; t < gl.animations[0].duration; t += 1 / 96) {
+      mixer.setTime(t); root.updateMatrixWorld(true); hs.push([t, tip.getWorldPosition(a).y - sh.getWorldPosition(b).y]);
+    }
+    const up = hs.reduce((m, h) => (h[1] > m[1] ? h : m)), down = hs.reduce((m, h) => (h[1] < m[1] ? h : m));
+    const [t0, t1] = [up[0], down[0]].sort((x, y) => x - y);
+    const mid = hs.filter(h => h[0] > t0 && h[0] < t1).reduce((m, h) => (Math.abs(h[1]) < Math.abs(m[1]) ? h : m), up);
+    keys = [up[0], mid[0], down[0]];
+  }
+  const UP = sample(keys[0]), MID = sample(keys[1]), DOWN = sample(keys[2]);
   act.stop(); mixer.uncacheRoot(root);
   // Folded: from the spread pose, collapse each wing's span toward the body (the feathers already trail to the tail),
   // sweep the tips in and drape the wing down over the flank. Rotations about the model's own axes; tuned by eye.
@@ -57,18 +76,33 @@ const thrushReady = loadModel(thrushModelUrl, 'Thrush').then(gl => {
   }
   const FOLD = bones.map(b => b.quaternion.clone());
   bones.forEach((b, i) => b.quaternion.copy(MID[i]));
-  // Centre the body on the origin (the model stands its body ~1.8 units up and forward of it).
-  root.scale.setScalar(THRUSH_SCALE); root.position.set(0, -0.33 * THRUSH_SCALE, -0.1 * THRUSH_SCALE);
+  if (fit.span) { // measured on the spread pose: the skinned vertices as the bones place them
+    root.updateMatrixWorld(true); root.traverse(o => o.isSkinnedMesh && o.skeleton.update());
+    const box = new THREE.Box3().setFromObject(root, true), c = box.getCenter(new THREE.Vector3()), k = fit.span / (box.max.x - box.min.x);
+    root.scale.setScalar(k); root.position.copy(c).multiplyScalar(-k);
+    // The raised wings lift the box above the body: drop the body (between the face and the tail) onto the origin.
+    root.updateMatrixWorld(true);
+    const y = n => findBone(root, n).getWorldPosition(new THREE.Vector3()).y;
+    root.position.y -= (y('face_') + y('tail02_r_')) / 2;
+  } else { root.scale.setScalar(fit.scale); root.position.set(...fit.at).multiplyScalar(fit.scale); }
   // Which of the model's wings lies on the bird's +x side, so one wing can be posed on its own (a shot bird with one
   // wing broken).
   root.updateMatrixWorld(true);
   const rIsPlusX = findBone(root, 'wingLength03_r_').getWorldPosition(new THREE.Vector3()).x > 0;
-  thrushRig = { root, UP, MID, DOWN, FOLD, FOLD_SPAN, names: bones.map(b => b.name), plusX: bones.map(b => b.name.includes('_r_') === rIsPlusX) };
+  return { root, UP, MID, DOWN, FOLD, FOLD_SPAN, names: bones.map(b => b.name), plusX: bones.map(b => b.name.includes('_r_') === rIsPlusX) };
 });
+let thrushRig = null, doveRig = null;
+// The thrush model stands its body ~1.8 units up and forward of its origin: centred by hand.
+const thrushReady = loadFlyer(thrushModelUrl, 'Thrush', { keys: [0, 0.25, 0.5], scale: 0.185, at: [0, -0.33, -0.1] }).then(K => { thrushRig = K; });
+// The dove drawn well over life size (a real one spans ~0.45 m), as the thrush is: at 30 m a life-size dove was a
+// speck on screen, where in the field it reads as a good-sized bird. The perched dove matches it. Darkened: its pale grey-buff, lit from behind the hunter, all but vanished into a hazy sky, where a real dove
+// reads as a dark shape.
+const doveReady = loadFlyer(doveFlightUrl, 'Mourning dove', { keys: 'auto', span: DOVE_SPAN, shade: 0.5 }).then(K => { doveRig = K; });
+
 // { g, wings: [], rig } — rig.pose(stroke, fold): stroke −1 (wings down) … 0 (spread) … 1 (up); fold 0 (open) … 1 (closed).
 // rig.pose(stroke, fold, stroke2, fold2) poses the bird's +x wing with the first pair and its −x wing with the second.
-export function makeThrushModel() {
-  const K = thrushRig; if (!K) return null;
+function makeFlyer(K) {
+  if (!K) return null;
   const g = new THREE.Group(), m = cloneSkinned(K.root); g.add(m);
   const bones = K.names.map(n => m.getObjectByName(n));
   const rig = {
@@ -84,5 +118,21 @@ export function makeThrushModel() {
   rig.pose(0, 1);
   return { g, wings: [], rig };
 }
+export const makeThrushModel = () => makeFlyer(thrushRig);
+export const makeDoveModel = () => makeFlyer(doveRig);
+
+/* ---------- Mourning dove: perched, downed birds and the menu card ---------- */
+// "Mourning Dove" by osuecampus: a perched dove (its head-turn clip is not used). On the ground it is laid on its
+// side or back like the other small birds, wings closed as they are when perched. Scaled to the flying dove's length.
+let dovePerched = null;
+const dovePerchedReady = loadModel(dovePerchedUrl, 'Perched dove').then(gl => {
+  if (!gl) return;
+  const root = gl.scene; prepareModel(root, THREE.DoubleSide);
+  root.updateMatrixWorld(true); root.traverse(o => o.isSkinnedMesh && o.skeleton.update());
+  const box = new THREE.Box3().setFromObject(root, true), c = box.getCenter(new THREE.Vector3()), k = DOVE_SPAN * 0.66 / (box.max.z - box.min.z); // as long as the flying dove
+  root.scale.setScalar(k); root.position.copy(c).multiplyScalar(-k);
+  const g = new THREE.Group(); g.add(root); dovePerched = g;
+});
+export const makeDoveCarcass = () => (dovePerched ? cloneSkinned(dovePerched) : null);
 // Resolves once every model has loaded or given up; the menu re-renders its bird cards then.
-export const birdModelsReady = Promise.all([chaffinchReady, mallardReady, thrushReady]);
+export const birdModelsReady = Promise.all([chaffinchReady, mallardReady, thrushReady, doveReady, dovePerchedReady]);

@@ -204,6 +204,12 @@ export function createAudio(volume = 1) {
       const b = bus({ at, send: 0.2, gain: vol * 0.45 }), f = rnd(7000, 7800);
       tone(b, n, 0.8, f, f * 0.9, 0.05); tone(b, n + 0.004, 0.2, f * 1.5, f * 1.3, 0.035);
     },
+    // A mourning dove's wings as it flushes or flares: a whistling twitter, one note per quick wingbeat, fading out.
+    whistle(at, vol = 1) {
+      if (voices >= 5 || ac.state !== 'running') return;
+      const n = ac.currentTime, b = bus({ at, send: 0.12, gain: vol * 0.9 }), f = rnd(1900, 2500), beat = rnd(0.11, 0.14);
+      for (let i = 0; i < 7; i++) noise(b, n + i * beat, 0.6 * (1 - i / 8), 'bandpass', f * 1.12, f * 0.95, beat * 0.8, 9, 0.02);
+    },
     /* ---------- the night hunt ---------- */
     // A thrush's thin "tsip" in the dark as it comes in: always the synthesised call, as the recording is song.
     alarm(at, vol = 1) {

@@ -1,5 +1,5 @@
 // Quarry and shotgun choice cards, shared by the Hunt tab and the room lobby.
-import { QUARRY, WEAPONS } from '../../config/gameplay.js';
+import { QUARRY, WEAPONS, CHOKES } from '../../config/gameplay.js';
 import { MAPS, mapsFor } from '../../config/maps.js';
 
 const Rating = ({ label, v }) => (
@@ -16,7 +16,7 @@ const gunRatings = w => ({
 // portraits: { [kind]: image URL } rendered from the 3D models.
 export function QuarryPicker({ value, onPick, portraits }) {
   return (
-    <div className="cards four" role="radiogroup" aria-label="Quarry">
+    <div className="cards five" role="radiogroup" aria-label="Quarry">
       {Object.entries(QUARRY).map(([k, q]) => (
         <button key={k} role="radio" aria-checked={k === value} className={k === value ? 'pick on' : 'pick'} onClick={() => onPick(k)}>
           <span className="pic bird">{portraits[k] && <img src={portraits[k]} alt="" />}<em>×{q.pts}</em></span>
@@ -58,6 +58,26 @@ export function GunPicker({ value, onPick, pictures }) {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// The screw-in choke in each barrel of the chosen gun (see CHOKES). value: the choke per barrel · onPick(barrel, choke).
+const BARRELS = { semi: ['Choke'], double: ['Bottom barrel · 1st shot', 'Top barrel · 2nd shot'] };
+export function ChokePicker({ weapon, value, onPick }) {
+  return (
+    <div className="chokes">
+      {value.map((v, b) => (
+        <div key={b} className="chokerow" role="radiogroup" aria-label={BARRELS[weapon]?.[b] || 'Choke'}>
+          <span>{BARRELS[weapon]?.[b] || 'Choke'}</span>
+          {Object.entries(CHOKES).map(([k, c]) => (
+            <button key={k} role="radio" aria-checked={k === v} className={k === v ? 'choke on' : 'choke'} onClick={() => onPick(b, k)} title={c.line} aria-label={`${k} ${c.name}: ${c.line}`}>
+              <b>{k}</b>{c.name}
+            </button>
+          ))}
+        </div>
+      ))}
+      <p className="hint">1 Tight: small and precise, kills much further · 3 Open: wide and forgiving close, thins out early.</p>
     </div>
   );
 }
