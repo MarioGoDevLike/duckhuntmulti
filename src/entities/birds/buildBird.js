@@ -3,6 +3,7 @@
 // secondaries on the arm, fanned primaries on the hand), plus a fanned tail. Bird space: facing +z.
 // Returns { g, wings: [[inner, outer], ...], foldDrop } — inner flaps about z and folds about y, outer is the hand.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { mesh } from '../../core/meshes.js';
 import { featherBack, featherOut, flat, pm, fringed, mix } from './plumage.js';
 
@@ -70,9 +71,33 @@ export function buildBird(S) {
     }
     mesh(flat([[0, ch * 0.42], [P * 0.45, ch * 0.3], [P * 0.4, -ch * 0.05], [0, -ch * 0.15]]), S.wing.handCoverts ?? S.wing.coverts, outer, 0, 0.001, 0);
     S.wing.under?.(inner, A, ch);
+    inner.name = `wi${wings.length}`; outer.name = `wo${wings.length}`;
     inner.add(outer); sh.add(inner); g.add(sh); wings.push([inner, outer]);
   }
+  bake(g);
   g.scale.setScalar(S.scale);
   // foldDrop: how far a closed wing sits below its flight hinge, so the coverts lie on the flank, not above the back.
   return { g, wings, foldDrop: (S.wing.drop ?? 0) * r };
+}
+
+// A bird is ~80 little meshes (every feather its own): one draw call each. Merge, within each group, the meshes that
+// share a material into one, so a bird draws in a few dozen calls at most and a flock does not choke the frame.
+function bake(root) {
+  root.traverse(grp => {
+    const sets = new Map();
+    for (const m of grp.children) {
+      if (!m.isMesh || m.children.length) continue;
+      const geo = m.geometry, key = `${m.material.uuid}|${!!geo.index}|${Object.keys(geo.attributes).sort()}`;
+      if (!sets.has(key)) sets.set(key, []);
+      sets.get(key).push(m);
+    }
+    for (const ms of sets.values()) {
+      if (ms.length < 2) continue;
+      const geos = ms.map(m => { m.updateMatrix(); return m.geometry.clone().applyMatrix4(m.matrix); });
+      const merged = mergeGeometries(geos); geos.forEach(x => x.dispose());
+      if (!merged) continue;
+      ms.forEach(m => grp.remove(m));
+      grp.add(new THREE.Mesh(merged, ms[0].material));
+    }
+  });
 }

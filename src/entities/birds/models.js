@@ -9,6 +9,7 @@ import thrushModelUrl from '../../assets/models/thrush_3D.glb?url';
 import mallardModelUrl from '../../assets/models/duck_3d.glb?url';
 import doveFlightUrl from '../../assets/models/mourning_dove_-_in_flight.glb?url';
 import dovePerchedUrl from '../../assets/models/mourning_dove.glb?url';
+import woodcockScanUrl from '../../assets/models/woodcock.glb?url';
 
 /* ---------- Chaffinch: photogrammetry scan, downed birds only ---------- */
 // "Dead Chaffinch" by b-unicycling, a scan of a male lying on bark mulch. assets/models/chaffinch.glb is the bird cut
@@ -134,5 +135,17 @@ const dovePerchedReady = loadModel(dovePerchedUrl, 'Perched dove').then(gl => {
   const g = new THREE.Group(); g.add(root); dovePerched = g;
 });
 export const makeDoveCarcass = () => (dovePerched ? cloneSkinned(dovePerched) : null);
+/* ---------- Woodcock: scanned specimen, birds on the ground, downed birds and the menu card ---------- */
+// "American Woodcock" by RISD Nature Lab, cut to 24k triangles by art-source/blender/woodcock.py: standing, facing +z,
+// centred on its bounding box, 0.5 long bill to tail. No rig, so flying woodcock stay procedural. The scan's texture is
+// dark (a museum skin under studio light): brightened toward the live bird's dead-leaf rufous.
+let woodcockScan = null;
+const woodcockReady = loadModel(woodcockScanUrl, 'Woodcock').then(gl => {
+  if (!gl) return;
+  prepareModel(gl.scene);
+  gl.scene.traverse(o => { if (o.isMesh) { o.material.color.setRGB(1.75, 1.55, 1.35); o.material.envMapIntensity = 0.35; } });
+  const g = new THREE.Group(); g.add(gl.scene); woodcockScan = g;
+});
+export const makeWoodcockModel = () => woodcockScan?.clone() ?? null;
 // Resolves once every model has loaded or given up; the menu re-renders its bird cards then.
-export const birdModelsReady = Promise.all([chaffinchReady, mallardReady, thrushReady, doveReady, dovePerchedReady]);
+export const birdModelsReady = Promise.all([chaffinchReady, mallardReady, thrushReady, doveReady, dovePerchedReady, woodcockReady]);

@@ -311,7 +311,7 @@ function field(tex) {
     // The projectors: one at the tree's foot lighting the crown, two either side lighting the sky.
     const glow = glowTex(), crown = new THREE.Vector3(TREE.x, cy, TREE.z), at = new THREE.Vector3(TREE.x, y + 0.6, TREE.z + 4);
     projector(group, glow, at.x, at.z, crown.clone().sub(at).normalize(), { angle: 0.6, cd: 700, range: 18, color: 0xfff1d8, haze: 0.12 });
-    for (const sx of [-1, 1]) projector(group, glow, TREE.x + sx * 19, TREE.z, new THREE.Vector3(sx * 0.2, 1, -0.1).normalize(), { angle: 0.12, cd: 9000, range: 140, color: 0xeef2ff, haze: 0.5 });
+    for (const sx of [-1, 1]) projector(group, glow, TREE.x + sx * 19, TREE.z, new THREE.Vector3(sx * 0.12, 1, -0.05).normalize(), { angle: 0.5, cd: 9000, range: 140, color: 0xeef2ff, haze: 0.35 }); // wide floods across the sky
   }
 
   // The sky (rendered in Blender: art-source/blender/night_sky.py) on a dome inside the day sky, thinning away at first
@@ -421,7 +421,7 @@ function doveField(tex) {
   });
 
   // The far crop: painted rows from where the planted plants end to the far hedge, each row in 60 m lengths.
-  const NEAR = TOUCH ? 34 : 46; // m of planted sunflowers past the crop edge; painted rows beyond
+  const NEAR = TOUCH ? 26 : 32; // m of planted sunflowers past the crop edge; painted rows beyond
   const cropMat = new THREE.MeshLambertMaterial({ map: cropTexture(), alphaTest: 0.5, side: THREE.DoubleSide });
   cropMat.map.repeat.set(60 / 22, 1); // a 22 m stretch of painted plants per texture repeat
   const rows = [];
@@ -479,13 +479,19 @@ function doveField(tex) {
   }
   fieldProps.then(P => {
     if (!P) return;
+    // In 20 m strips across the view, each its own instanced mesh with its own bounds, so the strips off to the
+    // side of where the hunter is looking are culled: thousands of sunflowers drawn at once choked the frame.
     for (const [name, list] of Object.entries(spots)) {
-      const me = new THREE.InstancedMesh(...P[name], list.length);
-      list.forEach((s, i) => {
-        m.position.set(s.x, height(s.x, s.z), s.z); m.rotation.set(s.rx || 0, s.yaw, s.rz || 0, 'YXZ');
-        m.scale.set(s.s, s.s * (s.sy ?? 1), s.s); m.updateMatrix(); me.setMatrixAt(i, m.matrix);
-      });
-      group.add(me);
+      const bins = new Map();
+      for (const s of list) { const k = Math.floor(s.x / 20); if (!bins.has(k)) bins.set(k, []); bins.get(k).push(s); }
+      for (const part of bins.values()) {
+        const me = new THREE.InstancedMesh(...P[name], part.length);
+        part.forEach((s, i) => {
+          m.position.set(s.x, height(s.x, s.z), s.z); m.rotation.set(s.rx || 0, s.yaw, s.rz || 0, 'YXZ');
+          m.scale.set(s.s, s.s * (s.sy ?? 1), s.s); m.updateMatrix(); me.setMatrixAt(i, m.matrix);
+        });
+        me.computeBoundingSphere(); group.add(me);
+      }
     }
     m.rotation.order = 'XYZ';
   });
@@ -497,4 +503,29 @@ function doveField(tex) {
   };
 }
 
-export const BUILD = { lake, oakRide, pineRidge, clearing, field, doveField };
+/* ---------- Holly Wood: woodcock over a pointing dog ----------
+   Old oak wood with an understorey of holly and bramble, the floor deep in leaf litter. The hunters stand in a small
+   glade; the cover starts a few metres out and the trunks close in all round, so a flushed bird is seen in glimpses
+   between them. Flat round the glade, where the dog works. */
+const BUSH = new THREE.IcosahedronGeometry(1, 1).scale(1, 0.75, 1).translate(0, 0.55, 0);
+function hollyWood(tex) {
+  const group = new THREE.Group();
+  const height = (x, z) => hills(x, z) * smoothstep(Math.hypot(x, z), 35, 70);
+  ground(group, tex, height, (x, z, h, n) => [0.07 + n * 0.03, 0.42, 0.2 + n * 0.12]); // brown leaf litter
+  const glade = (x, z) => Math.abs(x) < 11 && z > -5 && z < 6; // the hunters' line, kept clear
+  const R = mulberry(20261113), rr = (a, b) => a + R() * (b - a); // the same wood on every screen in a room
+  const spot = (r0, r1) => { for (;;) { const a = rr(0, TAU), r = Math.sqrt(rr(r0 * r0, r1 * r1)), x = Math.sin(a) * r, z = Math.cos(a) * r; if (!glade(x, z)) return { x, z }; } };
+  const NEAR = TOUCH ? 140 : 220;
+  upgradeOaks(group, oaks(group, height, NEAR, () => spot(9, 70)));
+  oaks(group, height, TOUCH ? 220 : 380, () => spot(70, 170));
+  plant(group, height, [[BUSH, new THREE.MeshLambertMaterial()]], TOUCH ? 260 : 420, () => ({ // holly and bramble clumps
+    ...spot(5, 60), s: rr(0.6, 1.5), sy: rr(0.6, 1.3), hsl: R() < 0.55 ? [rr(0.3, 0.36), rr(0.35, 0.5), rr(0.1, 0.16)] : [rr(0.2, 0.27), rr(0.25, 0.35), rr(0.16, 0.24)],
+  }));
+  return {
+    group, height, water: null, grass: (x, z) => glade(x, z) || Math.sin(x * 0.3) * Math.cos(z * 0.27) > 0.55, grassScale: 0.6,
+    reachable: p => Math.hypot(p.x, p.z) < 45,
+    light: { sun: [62, 210], sky: [12, 1.2, 0.02, 0.7], hemi: [0xb8c2b4, 0x3e3426, 1.6], sunColor: 0xf0dcc0, sunI: 0.8, fog: [0x7d8676, 0.022] },
+  };
+}
+
+export const BUILD = { lake, oakRide, pineRidge, clearing, field, doveField, hollyWood };

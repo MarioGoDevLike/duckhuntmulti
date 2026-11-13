@@ -5,15 +5,25 @@ import { quarryOf } from '../../config/gameplay.js';
 import { makeDuck } from './duck.js';
 import { makeFinch } from './finch.js';
 import { makeThrush } from './thrush.js';
-import { makeFinchCarcass, makeMallardModel, makeThrushModel, makeDoveModel, makeDoveCarcass } from './models.js';
+import { makeWoodcock } from './woodcock.js';
+import { makeFinchCarcass, makeMallardModel, makeThrushModel, makeDoveModel, makeDoveCarcass, makeWoodcockModel } from './models.js';
 
 // The thrush and the dove are rigged models once loaded (d.rig drives their wings); the rest are procedural in flight.
 // Until the dove has loaded (or if it fails) a procedural thrush, a little larger, stands in for it.
 const doveStandIn = () => { const d = makeThrush(); d.g.scale.multiplyScalar(1.1); return d; };
+// Procedural birds are built once per sex and cloned: clones share geometry and materials (see toCarcass).
+const built = new Map();
+const shared = (kind, build) => male => {
+  const k = kind + !!male;
+  if (!built.has(k)) built.set(k, build(male));
+  const t = built.get(k), g = t.g.clone();
+  return { g, wings: t.wings.map((_, i) => [g.getObjectByName(`wi${i}`), g.getObjectByName(`wo${i}`)]), foldDrop: t.foldDrop, shared: true };
+};
 const MAKE = {
-  finch: makeFinch,
+  finch: shared('finch', makeFinch),
   thrush: () => makeThrushModel() ?? makeThrush(),
   dove: () => makeDoveModel() ?? doveStandIn(),
+  woodcock: shared('woodcock', makeWoodcock),
 };
 export const makeBird = (kind, male) => ({ ...(MAKE[kind] ?? makeDuck)(male), kind });
 
@@ -44,18 +54,18 @@ export function poseWings(d, sx, fx, s2, f2) {
   });
 }
 
-// Once a chaffinch, a duck or a dove is down, its flying model gives way to the real one: the chaffinch scan (already
+// Once a chaffinch, a duck, a dove or a woodcock (the standing scan, laid on its side) is down, its flying model gives way to the real one: the chaffinch scan (already
 // lying on its side, so laid flat: lie 0), the mallard (standing, so laid on its side: lie π/2) or the perched dove
 // (wings closed; laid on its side or back as it falls, like the rigged thrush). The thrush needs no swap; it folds its
 // wings. Until a model has loaded (or if it failed) the bird keeps its flying model.
-const CARCASS = { finch: makeFinchCarcass, duck: makeMallardModel, dove: makeDoveCarcass };
-const LIE = { finch: 0, duck: Math.PI / 2 }; // a model that only lies one way
+const CARCASS = { finch: makeFinchCarcass, duck: makeMallardModel, dove: makeDoveCarcass, woodcock: makeWoodcockModel };
+const LIE = { finch: 0, duck: Math.PI / 2, woodcock: Math.PI / 2 }; // a model that only lies one way (the woodcock scan stands: on its side)
 // Turns the chaffinch scan's upper side toward a viewer looking down -z, head to the left (in the hand, on its card).
 export const SCAN_FACE = new THREE.Euler(Math.PI / 2 - 0.35, 0, -Math.PI / 2 - 0.4, 'ZYX');
 export function toCarcass(d) {
   if (d.carcass) return;
   const c = CARCASS[d.kind]?.(); if (!c) return;
-  if (!d.rig) d.g.traverse(o => o.geometry?.dispose()); // each procedural bird builds its own geometry (a rigged clone shares it)
+  if (!d.rig && !d.shared) d.g.traverse(o => o.geometry?.dispose()); // shared clones (and rigged ones) keep their geometry
   d.g.clear(); c.scale.multiplyScalar(1 / d.g.scale.x); d.g.add(c);
   d.carcass = true; d.wings = []; d.rig = null; d.scan = d.kind === 'finch'; d.lie = LIE[d.kind];
 }

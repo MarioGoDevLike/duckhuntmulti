@@ -39,7 +39,7 @@ export const logout = () => signOut(auth);
 
 /* ---------- leaderboards ----------
    leaderboards/{quarry}/scores/{uid}   { name, score, ducks (birds bagged), updatedAt }
-   One board per quarry (duck | finch | thrush | dove | night), one document per player on each, holding only their best hunt there.
+   One board per quarry (duck | finch | thrush | dove | woodcock | night), one document per player on each, holding only their best hunt there.
    (The single board from before quarry choice, scores/{uid}, is no longer read.) */
 const boardScores = quarry => collection(db, 'leaderboards', quarry, 'scores');
 

@@ -19,7 +19,7 @@ export function createShotColumn() {
       for (let i = shots.length - 1; i >= 0; i--) {
         const s = shots[i], reach = Q.reach * s.choke.reach, fade = Q.fade * s.choke.reach, grow = 0.013 * s.choke.spread;
         for (const d of birds) {
-          if (!d.alive) continue;
+          if (!d.alive || d.hidden) continue;
           rel.copy(s.pos).sub(d.g.position); rv.copy(s.dir).multiplyScalar(SHOT_SPEED).sub(d.vel);
           const tt = clamp(-rel.dot(rv) / rv.lengthSq(), 0, dt); rel.addScaledVector(rv, tt);
           const miss = rel.length(), range = s.dist + SHOT_SPEED * tt, r = Q.hitR + range * grow;
@@ -34,7 +34,7 @@ export function createShotColumn() {
           else if (miss < s.miss) {
             const sp = d.vel.length(), along = sp > 0.5 ? rel.dot(d.vel) / sp : 0; s.miss = miss;
             // On the bird but not taken: the leaves, or a pattern too thin at that range — not a pointing error.
-            s.hint = miss < r ? (d.cover ? 'The leaves took the shot' : 'On it — too far for the pattern') : Math.abs(along) > Math.abs(rel.y) ? (along > 0 ? 'Too far ahead' : 'Behind — lead more') : (rel.y > 0 ? 'Over the top' : 'Underneath');
+            s.hint = miss < r ? (d.cover ? d.coverHint || 'The leaves took the shot' : 'On it — too far for the pattern') : Math.abs(along) > Math.abs(rel.y) ? (along > 0 ? 'Too far ahead' : 'Behind — lead more') : (rel.y > 0 ? 'Over the top' : 'Underneath');
           }
         }
         s.pos.addScaledVector(s.dir, SHOT_SPEED * dt); s.dist += SHOT_SPEED * dt;

@@ -62,8 +62,8 @@ def stars(scale, size, keep, gain):
     core = mrange(v.outputs['Distance'], 0.0, size, 1.0, 0.0)
     pick = mrange(v.outputs['Color'], keep, 1.0, 0.0, 1.0)  # only the cells whose random value is high get a star
     return math_('MULTIPLY', math_('MULTIPLY', core, pick), gain)
-s = math_('ADD', stars(260.0, 0.32, 0.86, 3.0), stars(700.0, 0.4, 0.8, 1.3))
-s = math_('ADD', s, math_('MULTIPLY', stars(1300.0, 0.45, 0.65, 0.9), band))
+s = math_('ADD', stars(260.0, 0.28, 0.94, 0.9), stars(700.0, 0.3, 0.92, 0.35))  # few, and faint: a real sky from a field
+s = math_('ADD', s, math_('MULTIPLY', stars(1300.0, 0.32, 0.88, 0.25), band))
 tint = node('ShaderNodeTexNoise'); tint.inputs['Scale'].default_value = 900; L.new(dirv, tint.inputs['Vector'])
 starcol = node('ShaderNodeMixRGB'); L.new(tint.outputs['Fac'], starcol.inputs[0]); starcol.inputs[1].default_value = (1.0, 0.85, 0.7, 1); starcol.inputs[2].default_value = (0.75, 0.85, 1.0, 1)
 lit = node('ShaderNodeMixRGB', blend_type='ADD'); L.new(s, lit.inputs[0]); L.new(mwc.outputs[0], lit.inputs[1]); L.new(starcol.outputs[0], lit.inputs[2])

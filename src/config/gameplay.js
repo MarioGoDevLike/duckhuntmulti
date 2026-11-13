@@ -39,6 +39,11 @@ export const QUARRY = {
           desc: 'Pass shooting · 30–40 mph, incoming over the field · flares when it spots you · 15-bird limit', one: 'dove', many: 'doves',
           hitR: 0.27, reach: 52, fade: 17, pts: 1.5, rest: 0.08, upturn: true, gap: [2.4, 5.6], wave: [38, 0.7], limit: 15,
           bag: { cols: 5, dx: 0.42, dz: 0.75, front: -2.0 } },
+  // Walked up in the wood: the dog quarters ahead and points; the bird flushes from cover at the dog's nose.
+  woodcock: { kind: 'woodcock', name: 'Woodcock', line: 'Flushed from cover over a pointing dog', speed: 4, skill: 5,
+              desc: 'Beccaccia · the bell goes quiet, the dog is on point · towers out of cover, zig-zags through the trees · 3-bird limit',
+              one: 'woodcock', many: 'woodcock', hitR: 0.21, reach: 42, fade: 14, pts: 3, rest: 0.07, upturn: false, gap: [10, 14], limit: 3,
+              bag: { cols: 4, dx: 0.42, dz: 0.7, front: -2.0 } },
   // Night lamping in the olive terraces: rooms only, one hunter holds the lamp and the others shoot (see game/night.js).
   night: { kind: 'night', bird: 'thrush', night: true, roomOnly: true, name: 'Night Thrush', line: 'Thrushes over the projectors, in the lamp', speed: 2, skill: 5,
            desc: 'Dujj at night · one hunter holds the lamp on the bird, the others shoot · 2+ hunters', one: 'thrush', many: 'thrushes',
@@ -49,12 +54,14 @@ export const roundTime = kind => (QUARRY[kind]?.night ? NIGHT.time : GAME_TIME);
 
 // The night hunt. Every designer number for lamping, roosting and flushing lives here.
 export const NIGHT = {
-  time: 360, dawn: 60,         // s from dusk to first light; no birds come in after the last `dawn` s
+  time: 300, dawn: 10,         // s from dusk to first light, which comes up over the last `dawn` s (no birds then)
   gap: 1.8,                    // m between the hunters at night (they stand together)
   first: 5, arrivals: [12, 22], // s to the first bird, and between birds (sometimes two together)
   // Circling the tree: r radius (m) · alt height above the field (m) · w angular speed (rad/s) · climb: m higher for
   // every shot that frightens it · leaveAfter: frights before it goes · max: s it circles before going anyway.
   circle: { r: [13, 24], alt: [16, 22], w: [0.35, 0.5], climb: 9, leaveAfter: 3, max: 45 },
+  holdT: 0.4,                  // s the lamp must stay on a passing bird before it turns to circle the tree
+  dark: 0.6,                   // share of the pattern that goes wide at a bird the lamp isn't on
   inSpeed: 12, outSpeed: 13,   // m/s coming in out of the dark, and going
   // The lamp. angle: rad half-width of the beam · range: m it reaches · cd: candela (three's physical lights) · dazzle:
   // how strongly it lights a point (for finding birds on the ground). The red filter cuts the range and the light.
@@ -78,8 +85,23 @@ export const DOVE = {
   flare: { climb: [3, 5], speed: 2.5, yaw: [0.25, 0.6] },
   landGlide: 50,             // m out from where it lands that it sets its wings and glides in
 };
-// Player settings (menu Settings tab) and their defaults: volume 0–1, look sensitivity ×, field of view in degrees.
-export const SETTINGS = { volume: 0.8, sensitivity: 1, fov: 55 };
+// How a woodcock is found and flushes (game/spawner.js, entities/birds/flight.js). Ranges are [min, max], drawn per bird.
+export const WOODCOCK = {
+  dist: [9, 22],      // m from the hunter where it sits, within `arc` rad either side of where the hunter faces
+  arc: 1.1,
+  point: [4.5, 6.5],  // s from the dog setting off to the flush: the run in and the point held
+  stand: 2.2,         // m the dog stops short of the bird
+  tower: [2.5, 4.5],  // m it climbs almost straight up to clear the cover, at `climb` m/s
+  climb: 7,
+  speed: [9, 12],     // m/s once away, low through the trunks
+  zig: [0.35, 0.7],   // s between zig-zags, each a turn of `yaw` rad either way
+  yaw: [0.4, 0.9],
+  height: [3, 7],     // m it holds once out of the cover, under the canopy
+  away: 45,           // m from the hunter at which it is lost in the wood
+};
+// Player settings (menu Settings tab) and their defaults: volume 0–1, look sensitivity ×, field of view in degrees,
+// graphics 'high' | 'low' (low: native-or-less resolution, thinner grass, coarser lamp shadow — for slower PCs).
+export const SETTINGS = { volume: 0.8, sensitivity: 1, fov: 55, graphics: 'high' };
 export const quarryOf = kind => QUARRY[kind] || QUARRY.duck;
 
 // Hunter and shot.

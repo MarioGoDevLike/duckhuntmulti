@@ -4,7 +4,8 @@
 import * as THREE from 'three';
 import { rnd, TAU } from '../core/math.js';
 import { makeBird } from '../entities/birds/bird.js';
-import { DOVE } from '../config/gameplay.js';
+import { DOVE, WOODCOCK } from '../config/gameplay.js';
+import { groundH } from '../world/terrain.js';
 import { DOVE_FIELD } from '../world/maps.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -12,6 +13,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 // o: { Q, map, R, flock, lag, facing (yaw most flights favour), voice (soundscape, or null for silent),
 //      line (the hunters' x, standing along z = 0: the same on every screen in a room) }.
 export function spawnFlight(o) {
+  if (o.Q.kind === 'woodcock') return woodcock(o);
   if (o.Q.kind === 'dove') return doves(o);
   if (o.Q.kind === 'finch') return finches(o);
   if (o.Q.kind === 'thrush') return thrush(o);
@@ -42,12 +44,12 @@ function ducks({ R, flock, lag, facing, voice }) {
   voice?.quack(d.g.position, rnd(0.7, 1));
 }
 
-// Chaffinches: one big flock of 4–20 at a time, always out of the front of the line (-z), high up, coming in
+// Chaffinches: one flock of 4–10 at a time, always out of the front of the line (-z), high up, coming in
 // on the left, the right or down the middle and passing over or beside the hunters. The flock weaves as one;
 // each bird bounds on its own rhythm inside it.
 function finches({ R, flock, lag, voice }) {
   const rr = (a, b) => a + R() * (b - a);
-  const speed = rr(11, 15), n = 4 + (R() * 17 | 0), lane = rr(-35, 35), alt = rr(15, 30), weave = rr(0, 6);
+  const speed = rr(11, 15), n = 4 + (R() * 7 | 0), lane = rr(-35, 35), alt = rr(15, 30), weave = rr(0, 6);
   const p = new THREE.Vector3(lane, alt, -115);
   const v = new THREE.Vector3(lane * rr(0.1, 0.6) + rr(-6, 6) - lane, 0, 115).normalize(); // passes near the line
   const lat = new THREE.Vector3(-v.z, 0, v.x);
@@ -87,6 +89,24 @@ function ridgeThrush({ R, flock, lag, voice }) {
   d.g.position.copy(p);
   flock.add(d, { vel: v.multiplyScalar(rr(18, 23)), alive: true, down: false, ph: 0, life: 0, wob: rr(0, 1), alt: rr(8, 18) }, true, lag);
   voice?.tsip(p);
+}
+
+// Woodcock in Holly Wood: one bird at a time, sitting tight in the leaf litter 9–22 m out in front of one of the
+// hunters, hidden until the flush. That hunter's dog runs in and points it (createGame); `hold` s after it was found it
+// bursts out — or sooner if a shot frightens it. Its escape line (away from the hunter) and its zig-zags are drawn
+// here, seeded in a room. Returns the bird, for the dog.
+function woodcock({ R, flock, facing, line }) {
+  const rr = (a, b) => a + R() * (b - a), W = WOODCOCK;
+  const hunter = line[R() * line.length | 0], a = facing + rr(-W.arc, W.arc), r = rr(...W.dist);
+  const x = hunter - Math.sin(a) * r, z = -Math.cos(a) * r;
+  const zigs = []; for (let i = 0, t = rr(0.5, 0.9), s = R() < 0.5 ? 1 : -1; i < 10; i++, t += rr(...W.zig), s = -s) zigs.push({ t, yaw: s * rr(...W.yaw) });
+  const d = makeBird('woodcock', true);
+  d.g.position.set(x, groundH(x, z) + 0.12, z); d.g.visible = false;
+  return flock.add(d, {
+    vel: new THREE.Vector3(), alive: true, down: false, hidden: true, hunter, hold: rr(...W.point),
+    head: Math.atan2(x - hunter, z) + rr(-0.6, 0.6), tower: rr(...W.tower), spd: rr(...W.speed), alt: rr(...W.height), zigs,
+    ph: rr(0, TAU), life: 0, bank: 0, clock: 0, acc: 0, scare: false, gone: false,
+  }, true, 0);
 }
 
 // Mourning doves on the Sunflower Field (world/maps.js): singles, pairs and small loose bunches flying in from the far

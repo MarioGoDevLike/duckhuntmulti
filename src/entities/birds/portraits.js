@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { QUARRY } from '../../config/gameplay.js';
 import { makeBird, foldWings } from './bird.js';
-import { makeMallardModel, makeDoveCarcass } from './models.js';
+import { makeMallardModel, makeDoveCarcass, makeWoodcockModel } from './models.js';
 // The chaffinch card is a still, rendered offline from a colour scan of a perched chaffinch ("Pinson des arbres" by
 // pattarrian) by art-source/blender/chaffinch_card.py — the scan is far too heavy to load in the game.
 import chaffinchCardUrl from '../../assets/images/chaffinch_card.webp?url';
@@ -20,8 +20,8 @@ export function birdPortraits(w = 360, h = 220) {
     const rim = new THREE.DirectionalLight(0xbfd4ff, 1.6); rim.position.set(-3, 1.5, -2); scene.add(rim);
     for (const kind of Object.keys(QUARRY)) {
       if (out[kind]) continue;
-      // The real models make the better portraits: the standing drake, the perched dove.
-      const card = kind === 'duck' ? makeMallardModel() : kind === 'dove' ? makeDoveCarcass() : null;
+      // The real models make the better portraits: the standing drake, the perched dove, the scanned woodcock.
+      const card = { duck: makeMallardModel, dove: makeDoveCarcass, woodcock: makeWoodcockModel }[kind]?.() ?? null;
       const d = card ? { g: card, wings: [] } : makeBird(QUARRY[kind].bird ?? kind, true); foldWings(d);
       d.g.rotation.set(QUARRY[kind].night ? -0.35 : 0.08, -1.0, 0); // on the roost it sits up
       // At night: the bird as the lamp finds it, lit hard from the front out of the dark.

@@ -1,11 +1,12 @@
-// The night hunt on the Projector Field. Thrushes come in out of the dark to the lone olive and circle it, seen only
-// where the projectors' beams (and the lamp) light them. Every shot frightens them: each one climbs higher, and after
-// enough it leaves. A bird that is hit falls in the dark and counts only once the lamp has found it on the ground.
+// The night hunt on the Projector Field. Thrushes pass over the field out of the dark, seen only where the projectors'
+// beams (and the lamp) light them. A bird the lamp catches and holds turns and circles the lone olive; one it misses
+// passes on and is gone. Every shot frightens them: each one climbs higher, and after enough it leaves. A bird that is hit falls in the dark and counts once its shooter's dog has brought it in.
 //
 // Every screen flies the same birds: a bird's path follows from the seed, its age and how often it was frightened.
 // What changes that is sent to the room as events — emit(ev) applies it here and hands it on (onEvent); the others
-// apply(ev) it:  { t: 'spook' } from the screen that fired (every bird in the air climbs), { t: 'found', id } from
-// the lamper's screen (the authority on finding birds).
+// apply(ev) it:  { t: 'hold', id, at } from the lamper's screen (the lamp caught it; it starts circling from at),
+// { t: 'spook' } from the screen that fired (every bird in the air climbs), { t: 'found', id } from
+// the shooter's screen once its dog has brought the bird in.
 import * as THREE from 'three';
 import { NIGHT } from '../config/gameplay.js';
 import { TAU } from '../core/math.js';
@@ -21,16 +22,17 @@ export function createNight(hooks) {
   const found = [];
 
   /* ---------- a bird's path ---------- */
-  // In: a straight run from far out in the dark to its place on the circle. Circle: round the tree, the radius
-  // breathing in and out, at a height that rises with every fright. Out: away and up, gone.
+  // Pass: a straight run across the field, through one of the projectors' beams, and away — unless the lamp catches
+  // it. Circle: once held in the lamp, round and round the tree, the radius breathing in and out, at a height that
+  // rises with every fright. Out: away and up, gone.
   function place(d, dt) {
     const n = d.n, t = d.life, p = d.g.position;
     n.alt += (C.alt[0] + n.alt0 + n.level * C.climb - n.alt) * Math.min(1, dt * 0.7);
     if (n.phase === 'in') {
-      const u = Math.min(1, t / n.tIn);
-      p.lerpVectors(n.from, n.entry, u); p.y += (n.alt - n.entry.y) * u;
-      d.vel.subVectors(n.entry, n.from).divideScalar(n.tIn);
-      if (u >= 1) n.phase = 'circle';
+      const u = Math.min(1, t / n.tPass);
+      p.lerpVectors(n.from, n.to, u); p.y = n.alt;
+      d.vel.subVectors(n.to, n.from).divideScalar(n.tPass);
+      if (u >= 1) return true; // never caught in the lamp: gone over
     } else if (n.phase === 'circle') {
       const tau = t - n.tIn, th = n.th0 + n.w * tau, r = n.r + 3 * Math.sin(0.6 * tau + n.ph);
       p.set(centre.x + Math.cos(th) * r, n.alt, centre.z + Math.sin(th) * r);
@@ -46,22 +48,32 @@ export function createNight(hooks) {
 
   // One bird from its arrival record (all of it from the seed, so the same on every screen).
   function spawn(a, lag) {
-    const d = makeBird('thrush', true), r = a.r, th0 = a.a + a.side * 0.6;
-    const entry = new THREE.Vector3(centre.x + Math.cos(th0) * r, C.alt[0] + a.alt0, centre.z + Math.sin(th0) * r);
-    const from = new THREE.Vector3(centre.x + Math.cos(a.a) * 150, entry.y + 18, centre.z + Math.sin(a.a) * 150);
-    d.n = { phase: 'in', from, entry, tIn: from.distanceTo(entry) / NIGHT.inSpeed, th0, r, w: a.w * a.side, ph: a.ph,
-      alt0: a.alt0, alt: entry.y, level: 0, tOut: 0, found: false, findT: 0 };
+    const d = makeBird('thrush', true), alt = C.alt[0] + a.alt0;
+    // In from far out, over one of the side projectors (through its beam), and on out the far side.
+    const from = new THREE.Vector3(centre.x + Math.cos(a.a) * 150, alt, centre.z + Math.sin(a.a) * 150);
+    const over = new THREE.Vector3(centre.x + a.side * (19 + a.r * 0.15), alt, centre.z + (a.ph - Math.PI) * 1.5);
+    const to = over.clone().addScaledVector(over.clone().sub(from).normalize(), 150);
+    d.n = { phase: 'in', from, to, tPass: from.distanceTo(to) / NIGHT.inSpeed, tIn: 0, th0: 0, r: a.r, w: a.w * a.side, ph: a.ph,
+      alt0: a.alt0, alt, level: 0, tOut: 0, litT: 0, found: false };
     d.g.position.copy(from);
+    // Shot at in the dark (only the projectors on it), most of the pattern goes wide: the lamp makes it a fair shot.
+    d.cover = () => (lamp.dazzleAt(d.g.position) > 0.02 ? 0 : NIGHT.dark); d.coverHint = 'Too dark — get the lamp on it';
     flock.add(d, { vel: new THREE.Vector3(), alive: true, down: false, ph: a.ph, life: lag, wob: a.ph }, true, 0);
-    hooks.audio()?.alarm(entry, 0.5); // its thin call, out of the dark
+    hooks.audio()?.alarm(over, 0.5); // its thin call, out of the dark
   }
 
   /* ---------- events ---------- */
   function apply(ev) {
     if (ev.t === 'spook') { for (const d of flock.birds) if (d.n && d.alive) d.n.level++; return; }
     const d = flock.birds.find(b => b.id === ev.id && b.n); if (!d) return;
+    if (ev.t === 'hold' && d.alive && d.n.phase === 'in') { // caught in the lamp: it turns and starts circling the tree
+      const n = d.n, p = d.g.position.fromArray(ev.at);
+      n.phase = 'circle'; n.tIn = d.life; n.th0 = Math.atan2(p.z - centre.z, p.x - centre.x);
+      n.r = Math.min(C.r[1] + 4, Math.max(C.r[0], Math.hypot(p.x - centre.x, p.z - centre.z)));
+      n.alt = p.y; n.alt0 = p.y - C.alt[0] - n.level * C.climb; return;
+    }
     if (ev.t === 'found' && !d.n.found) { // counted even if here it is still falling: every screen keeps the same bag
-      d.n.found = true; found.push(d.id); hooks.onFound(d); flock.removeWhere(b => b === d);
+      d.n.found = true; found.push(d.id); hooks.onFound(d); if (!d.retrieved) flock.removeWhere(b => b === d); // the others' copies: picked up
     }
   }
   const emit = ev => { apply(ev); hooks.onEvent?.(ev); };
@@ -94,13 +106,14 @@ export function createNight(hooks) {
     update(dt, elapsed) {
       while (next < arrivals.length && elapsed >= arrivals[next].at) { const a = arrivals[next++]; spawn(a, elapsed - a.at); }
       if (!authority) return;
-      for (const d of flock.birds) { // the lamp held on a downed bird finds it
-        const n = d.n; if (!n || d.alive || !d.down || n.found) continue;
-        const near = d.g.position.distanceTo(lamp.origin) < NIGHT.findR && lamp.dazzleAt(d.g.position) > 0.02;
-        n.findT = near ? n.findT + dt : Math.max(0, n.findT - dt);
-        if (n.findT >= NIGHT.findT) emit({ t: 'found', id: d.id });
+      for (const d of flock.birds) { // the lamper's screen decides when the lamp has caught a passing bird
+        const n = d.n; if (!n || !d.alive || n.phase !== 'in') continue;
+        n.litT = lamp.dazzleAt(d.g.position) > 0.02 ? n.litT + dt : 0;
+        if (n.litT >= NIGHT.holdT) emit({ t: 'hold', id: d.id, at: d.g.position.toArray().map(x => +x.toFixed(2)) });
       }
     },
+    // Our dog has brought this bird in (it was ours): into the party's bag, on every screen.
+    fetched(d) { if (d.n && !d.n.found) emit({ t: 'found', id: d.id }); },
     get stats() {
       let down = 0, flying = 0;
       for (const d of flock.birds) if (d.n) { if (d.alive) flying++; else if (d.down && !d.n.found) down++; }

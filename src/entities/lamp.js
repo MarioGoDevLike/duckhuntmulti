@@ -54,6 +54,7 @@ export function createLamp(scene, camera) {
     origin, dir,
     get beam() { return cur; },
     // In my hand (the lamper's screen) or someone else's.
+    shadowSize(n) { if (light.shadow.mapSize.x !== n) { light.shadow.mapSize.set(n, n); light.shadow.map?.dispose(); light.shadow.map = null; } },
     setMine(v) { mine = hand.g.visible = !!v; }, // !!: three hides only on visible === false, and a day hunt passes null
     // pos, d: where the lamp is and where it points (unit) · state: see above · T: the clock, for a weak battery's flicker.
     update(pos, d, state, T) {

@@ -41,7 +41,7 @@ export function createGame(canvas, cb) {
   /* ---------- state ---------- */
   let audio = null, raf = 0, last = performance.now(), T = 0, state = 'menu', paused = false;
   // View and gun handling. ads: 0 hip … 1 shouldered · brk: 0 … 1 over-under broken open.
-  const settings = { volume: 1, sensitivity: 1, fov: 55 }; // see App's Settings tab
+  const settings = { volume: 1, sensitivity: 1, fov: 55, graphics: 'high' }; // see App's Settings tab
   let yaw = 0, pitch = 0.16, kick = 0, aim = false, ads = 0, brk = 0, menuSpawnT = 1;
   // The round. mp: { seed, startAt (local ms), slot, count } while hunting in a room; R drives the flights, seeded in a room.
   let W = WEAPONS.semi, chokes = chokesFor('semi'), Q = QUARRY.duck, map = MENU_MAP, mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, poseT = 0;
@@ -72,7 +72,7 @@ export function createGame(canvas, cb) {
   const night = createNight({
     flock, lamp, audio: () => (state === 'play' ? audio : null),
     onEvent: ev => cb.onNightEvent?.(ev),
-    onFound(d) { // a downed bird found with the lamp: into the bag, points for the whole party
+    onFound(d) { // a downed bird brought in by its shooter's dog: into the bag, points for the whole party
       bagged++; score = bagged * NIGHT.pts;
       cb.onMsg('Found it — ' + bagged + ' in the bag' + (killLog.get(d.id) === 'me' ? ' · your bird' : '')); hud();
     },
@@ -85,12 +85,15 @@ export function createGame(canvas, cb) {
     canGrab: inspector.canGrab, holding: inspector.holding,
     night: Q.night ? { role, lamp: { ...lampState, bat: Math.round(lampState.bat * 100) / 100 }, kills, ...night.stats } : null,
   });
-  let nightHudT = 0;
+  let nightHudT = 0, bellT = 0;
 
   /* ---------- rules ---------- */
   // line: where the hunters stand (doves flare on seeing them); in a room every slot, so all screens agree.
   const line = () => (mp ? Array.from({ length: mp.count }, (_, i) => slotX(i, mp.count)) : [camera.position.x]);
-  const spawn = (lag = 0) => spawnFlight({ Q, map, R, flock, lag, facing: mp ? 0 : yaw, voice: state === 'play' ? audio : null, line: line() });
+  const spawn = (lag = 0) => {
+    const d = spawnFlight({ Q, map, R, flock, lag, facing: mp ? 0 : yaw, voice: state === 'play' ? audio : null, line: line() });
+    if (d?.hidden && Math.abs(d.hunter - camera.position.x) < 0.5) retriever.point(d); // a woodcock found in front of us: our dog points it
+  };
 
   // hit: how the shot took it (see shotColumn), or null for a bird another hunter dropped. Returns how it comes down.
   function drop(d, hit = null) {
@@ -104,7 +107,7 @@ export function createGame(canvas, cb) {
   function kill(d, range, hit) {
     if (Q.night) { // at night a bird only counts once it has been found on the ground with the lamp
       kills++; drop(d, hit); killLog.set(d.id, 'me'); lastKill = T; /* shotcam.kill(); SHOTCAM OFF */
-      cb.onMsg('Down · ' + (range | 0) + ' m — light it on the ground to find it'); hud();
+      cb.onMsg('Down · ' + (range | 0) + ' m — the dog is on it'); hud();
       cb.onKill?.(d.id, 0);
       return;
     }
@@ -128,7 +131,7 @@ export function createGame(canvas, cb) {
     // Birds flare at the shot. Solo only: in a room every screen must fly identical birds, and a random
     // flare from one hunter's gun would send their copies somewhere else on everyone else's screen. (In a room
     // doves still flare, on every screen alike, when they come close enough to see the line: see flight.js.)
-    if (!mp && !Q.night) for (const d of flock.birds) if (d.alive) { if (d.kind === 'dove') d.scare = true; else d.vel.y += rnd(0.3, 1.6); }
+    if (!mp && !Q.night) for (const d of flock.birds) if (d.alive) { if (d.kind === 'dove' || d.kind === 'woodcock') d.scare = true; else d.vel.y += rnd(0.3, 1.6); }
     if (Q.night) night.spook(); // every bird in the air takes fright and climbs (on every screen)
     hud(); if (mp) pose();
   }
@@ -225,7 +228,7 @@ export function createGame(canvas, cb) {
   }
 
   const maybeFetch = d => {
-    if (state === 'play' && !Q.night && killLog.get(d.id) === 'me' && retriever.inReach(d.g.position) && world.reachable(d.g.position)) retriever.fetch(d);
+    if (state === 'play' && killLog.get(d.id) === 'me' && (Q.night || (retriever.inReach(d.g.position) && world.reachable(d.g.position)))) retriever.fetch(d); // at night the dog goes as far as it takes
   };
   function stepBirds(dt) {
     const voice = state === 'play' ? audio : null;
@@ -240,7 +243,8 @@ export function createGame(canvas, cb) {
         }
       } else if (d.afloat) {
         if (world.drift(d.g.position, dt)) { d.afloat = false; d.life = 0; maybeFetch(d); } // ashore: the dog can reach it
-      } else gone = !d.n && d.life > 8 && !d.fetch && !d.retrieved; // the dog's birds stay; at night they lie until found
+      } else gone = !d.n && d.life > 8 && !d.fetch && !d.retrieved; // the dog's birds stay; at night they lie until fetched
+      if (d.n && d.retrieved) night.fetched(d); // at night: in the bag once our dog has brought it
       if (gone) flock.remove(i);
     }
   }
@@ -256,6 +260,7 @@ export function createGame(canvas, cb) {
 
     if (!bag.view) camera.rotation.set(pitch + kick * 0.03, yaw, 0);
     stepLamp();
+    if (state === 'play' && Q.kind === 'woodcock' && retriever.ranging() && (bellT -= dt) <= 0) { bellT = rnd(0.28, 0.42); audio.bell(retriever.at()); } // the bell goes quiet on point
     if (state === 'play') { retriever.update(dt, T); if (!inspector.holding && !Q.night) inspector.scan(); }
     else retriever.idle(dt, T);
     // Right mouse shoulders the gun: the eye drops just above the rib and looks down it to the bead. Reloading takes it
@@ -296,6 +301,14 @@ export function createGame(canvas, cb) {
   });
   const onResize = () => { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); };
   addEventListener('resize', onResize);
+  // Low keeps the look (same lighting, models and sky) but draws fewer pixels and grass blades.
+  const applyGraphics = () => {
+    const low = settings.graphics === 'low';
+    renderer.setPixelRatio(low ? Math.min(devicePixelRatio, 1) : Math.min(devicePixelRatio, TOUCH ? 1.5 : 2));
+    world.grassDensity(low ? 0.5 : 1);
+    lamp.shadowSize(low || TOUCH ? 512 : 1024);
+    onResize();
+  };
   onResize(); raf = requestAnimationFrame(frame);
   // Development builds only: a handle for tuning from the console (look somewhere, inspect the birds and the night).
   if (import.meta.env.DEV) window.__hunt = { flock, night, lamp, /* shotcam, SHOTCAM OFF */ camera, renderer, scene, look(y, p) { yaw = y; pitch = p; }, step, fire, get hud() { return { score, bagged, kills, shells }; } };
@@ -318,7 +331,7 @@ export function createGame(canvas, cb) {
       Object.assign(lampState, { on: false, spot: false, red: false, bat: 1 });
       hunters.setGap(Q.night ? NIGHT.gap : 5); lamp.hide(); lamp.setMine(holdsLamp()); audio.night(!!Q.night);
       camera.position.set(mp ? slotX(mp.slot, mp.count, Q.night ? NIGHT.gap : 5) : 0, EYE, 0);
-      retriever.reset(); retriever.show(!Q.night); // no dog at night: the lamp finds the birds
+      retriever.reset(); retriever.show(true);
       if (Q.night) night.start(world.map, R, role !== 'gun');
       else { const hx = camera.position.x; world.mow([hx - 0.6, hx + 3.4, -5.5, 1.2]); } // short grass where the dog lays the birds
       score = bagged = shots = 0; shells = W.mag; reloading = false; reloadT = 0; nextShot = 0; lastKill = -9;
@@ -351,8 +364,8 @@ export function createGame(canvas, cb) {
       world.setMap(map);
       return out;
     },
-    // s: { volume 0–1, sensitivity (×), fov (degrees) }, any subset.
-    setSettings(s) { Object.assign(settings, s); audio?.setVolume(settings.volume); }, // call from a click so a room's start has sound
+    // s: { volume 0–1, sensitivity (×), fov (degrees), graphics 'high' | 'low' }, any subset.
+    setSettings(s) { Object.assign(settings, s); audio?.setVolume(settings.volume); applyGraphics(); }, // call from a click so a room's start has sound
     // Another hunter (by) claimed this bird first: it falls here too and goes in their bag.
     remoteKill(id, by) { killLog.set(id, by); const d = flock.birds.find(x => x.id === id && x.alive); if (d) drop(d); },
     // Our claim lost the race: take the points back.

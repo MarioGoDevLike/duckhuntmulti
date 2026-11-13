@@ -1,8 +1,13 @@
 // The retriever. Our birds that land within reach are fetched one at a time and laid next to the hunter in rows,
 // like the bag; birds the dog does not get to simply stay where they fell. A small state machine:
 //   sit → out (run to the bird) → back (carry it to the pile) → home → sit
+// In the woodcock wood the dog also works as a pointer: between birds it quarters the cover ahead of the hunter (bell
+// ringing); sent to a found bird it runs in and freezes on point (bell silent), and holds there, steady to wing and
+// shot, until the bird is up — then sits where it stood, ready to fetch.
+//   sit/quarter → point (run in, hold) → sit
 import * as THREE from 'three';
 import { rnd } from '../../core/math.js';
+import { WOODCOCK } from '../../config/gameplay.js';
 import { groundH } from '../../world/terrain.js';
 import { foldWings, lay } from '../birds/bird.js';
 import { makeStandInDog } from './standInDog.js';
@@ -23,7 +28,9 @@ export function createRetriever(scene, camera, { quarry, isMine }) {
   });
 
   const queue = [], dv = new THREE.Vector3();
-  let mode = 'sit', bird = null, pileN = 0;
+  let mode = 'sit', bird = null, pileN = 0, running = false;
+  const quarter = new THREE.Vector3(), stand = new THREE.Vector3(); let quarterT = 0;
+  const pointer = () => quarry().kind === 'woodcock';
   const hunterX = () => camera.position.x;
   const home = () => new THREE.Vector3(hunterX() + 1.1, 0, 0.5);
   const pileSpot = k => { // rows to the front-right of the hunter
@@ -41,18 +48,34 @@ export function createRetriever(scene, camera, { quarry, isMine }) {
   return {
     show(v) { dog.g.visible = v; },
     reset() {
-      queue.length = 0; bird = null; mode = 'sit'; pileN = 0;
+      queue.length = 0; bird = null; mode = 'sit'; pileN = 0; quarterT = 0;
       dog.g.position.copy(home()); dog.g.rotation.set(0, SIT_YAW, 0);
     },
     inReach: p => Math.hypot(p.x - hunterX(), p.z) < FETCH_RANGE,
     fetch(d) { d.fetch = true; queue.push(d); },
+    // Point a hidden woodcock: run in to `stand` m short of it, on the hunter's side, and freeze facing it.
+    point(d) {
+      if (mode === 'out' || mode === 'back') return; // busy with a fetch: the bird flushes unpointed
+      bird = d; mode = 'point';
+      stand.set(hunterX() - d.g.position.x, 0, -d.g.position.z).normalize().multiplyScalar(WOODCOCK.stand).add(d.g.position);
+    },
+    ranging: () => running && pointer(), // the bell rings while the dog moves
+    at: () => dog.g.position,
     // Called off the hunt (the bag): drop everything and sit there.
     sitAt(x, z, yaw) {
       queue.length = 0; bird = null; mode = 'sit';
       dog.g.position.set(x, 0, z); dog.g.rotation.set(0, yaw, 0);
     },
     update(dt, T) {
-      let running = false;
+      running = false;
+      if (mode === 'point') {
+        if (!bird.hidden) { mode = 'sit'; bird = null; } // flushed: steady where it stands
+        else if (moveTo(stand, dt, SPEED.out)) dog.g.rotation.y = Math.atan2(bird.g.position.x - dog.g.position.x, bird.g.position.z - dog.g.position.z);
+        else running = true;
+      } else if (mode === 'sit' && !queue.length && pointer()) { // quartering the cover 6–18 m ahead, across the front
+        if ((quarterT -= dt) <= 0 || moveTo(quarter, dt, 3.2)) { quarterT = rnd(2.5, 4.5); quarter.set(hunterX() + rnd(-14, 14), 0, -rnd(6, 18)); }
+        else running = true;
+      }
       if (mode === 'sit' && queue.length) {
         bird = queue.shift();
         mode = isMine(bird) && bird.down && !bird.retrieved ? 'out' : 'sit';

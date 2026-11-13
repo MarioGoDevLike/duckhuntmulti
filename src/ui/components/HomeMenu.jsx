@@ -65,6 +65,7 @@ const Credits = () => (
     <a href="https://sketchfab.com/3d-models/swainsons-thrush-in-flight-8784ede7ab0a46ad9967a772676e5c47" target="_blank" rel="noreferrer">“Swainson's Thrush - in Flight”</a> by osuecampus (wingbeat re-posed) ·{' '}
     <a href="https://sketchfab.com/3d-models/mourning-dove-in-flight-37f9b2cc8b174fc3a2d8ba9f5b467b1a" target="_blank" rel="noreferrer">“Mourning Dove - in Flight”</a> and{' '}
     <a href="https://sketchfab.com/3d-models/mourning-dove-8ef704c7846d4782b76efd2a955d5b4e" target="_blank" rel="noreferrer">“Mourning Dove”</a> by osuecampus ·{' '}
+    <a href="https://sketchfab.com/3d-models/american-woodcock-aa5995bf8ee54ceebd2adf9148d3f9fd" target="_blank" rel="noreferrer">“American Woodcock”</a> by RISD Nature Lab (decimated) ·{' '}
     <a href="https://sketchfab.com/3d-models/realistic-mallard-duck-game-ready-asset-dd33cd2e30944a4aae2de1a06a828f4f" target="_blank" rel="noreferrer">“Realistic Mallard Duck”</a> by 3Dima ·{' '}
     <a href="https://sketchfab.com/3d-models/labrador-dog-1f56cfbab07e4fe49b5d9e521c82073a" target="_blank" rel="noreferrer">“Labrador Dog”</a> by kenchoo (gallop added) ·{' '}
     <a href="https://sketchfab.com/3d-models/low-poly-shotgun-bff766c9561e4bccb27f2036b9d3090a" target="_blank" rel="noreferrer">“low poly shotgun”</a> by leoxx300 ·{' '}
@@ -72,7 +73,7 @@ const Credits = () => (
   </div>
 );
 
-// Volume, look sensitivity and field of view. settings: see SETTINGS in config/gameplay.js.
+// Volume, look sensitivity, field of view and graphics quality. settings: see SETTINGS in config/gameplay.js.
 function Settings({ settings, onSetting }) {
   const row = (id, label, value, shown, props) => (
     <div className="setting">
@@ -84,6 +85,14 @@ function Settings({ settings, onSetting }) {
     {row('volume', 'Sound volume', settings.volume, settings.volume ? `${Math.round(settings.volume * 100)}%` : 'Muted', { min: 0, max: 1, step: 0.05 })}
     {row('sensitivity', TOUCH ? 'Look sensitivity' : 'Mouse sensitivity', settings.sensitivity, `${settings.sensitivity.toFixed(2)}×`, { min: 0.3, max: 2.5, step: 0.05 })}
     {row('fov', 'Field of view', settings.fov, `${settings.fov}°`, { min: 45, max: 80, step: 1 })}
+    <div className="setting">
+      <label id="graphics"><span>Graphics</span><b>{settings.graphics === 'low' ? 'Low' : 'High'}</b></label>
+      <div className="chokerow" role="radiogroup" aria-labelledby="graphics">
+        {[['high', 'High', 'Full resolution and thick grass'], ['low', 'Low', 'Smoother on slower PCs']].map(([k, name, line]) => (
+          <button key={k} role="radio" aria-checked={settings.graphics === k} className={settings.graphics === k ? 'choke on' : 'choke'} onClick={() => onSetting('graphics', k)} title={line}>{name}</button>
+        ))}
+      </div>
+    </div>
     <p className="hint">Saved in this browser. Changes apply straight away, even mid-hunt.</p>
   </>;
 }

@@ -1,6 +1,6 @@
 // How each quarry flies, and how a shot bird falls. Called once per bird per frame by the game.
 import * as THREE from 'three';
-import { quarryOf, DOVE } from '../../config/gameplay.js';
+import { quarryOf, DOVE, WOODCOCK } from '../../config/gameplay.js';
 import { rnd, TAU } from '../../core/math.js';
 import { groundH } from '../../world/terrain.js';
 import { foldWings, poseWings, toCarcass, lay } from './bird.js';
@@ -19,7 +19,8 @@ function beat(d, base, amp, hand) {
 // A live bird, one step. voice: the soundscape while a hunt is on (birds call), else null. True once it has left the field.
 export function fly(d, dt, voice) {
   const p = d.g.position;
-  if (d.kind === 'dove') dove(d, dt, voice);
+  if (d.kind === 'woodcock') woodcock(d, dt, voice);
+  else if (d.kind === 'dove') dove(d, dt, voice);
   else if (d.kind === 'finch') {
     // Bounding flight: a burst of quick wingbeats lifts the bird, then it tucks its wings and drops in an arc.
     // The heading weaves from side to side so the flock never flies a straight line.
@@ -49,7 +50,7 @@ export function fly(d, dt, voice) {
     for (const [a, b] of d.wings) { a.rotation.z = 0.12 + 0.62 * Math.sin(d.ph); b.rotation.z = 0.5 * Math.sin(d.ph - 1.1); }
     if (voice && Math.random() < dt * 0.05) voice.quack(p, rnd(0.5, 0.9)); // the flock keeps talking
   }
-  return d.landed || (Math.hypot(p.x, p.z) > FIELD_EDGE && p.x * d.vel.x + p.z * d.vel.z > 0); // (not one still coming in)
+  return d.landed || d.gone || (Math.hypot(p.x, p.z) > FIELD_EDGE && p.x * d.vel.x + p.z * d.vel.z > 0); // (not one still coming in)
 }
 
 /* ---------- Mourning dove ----------
@@ -119,6 +120,40 @@ function doveStep(d, dt, voice) {
   d.yawNow = yaw; d.dipNow = dip; d.glideNow = glide;
 }
 
+/* ---------- Woodcock ----------
+   Sits tight, unseen, until the dog has pointed it `hold` s (or a shot frightens it), then bursts out of the cover on
+   whirring wings: towers almost straight up to clear the undergrowth, then away low under the canopy, fast, zig-zagging
+   between the trunks, and is lost in the wood `away` m out. Bird state (see spawner): hidden, hunter (its hunter's x),
+   hold, head (escape heading), tower, spd, alt, zigs [{ t, yaw }] (after the flush), bank, clock, acc, scare, gone.
+   Fixed clock, as the dove's, so every screen in a room sees the same zig-zags. */
+const WC_STEP = 1 / 120;
+function woodcock(d, dt, voice) {
+  d.acc += dt;
+  while (d.acc >= WC_STEP) { d.acc -= WC_STEP; woodcockStep(d, WC_STEP, voice); }
+  if (d.hidden) { foldWings(d); return; }
+  faceAlong(d); d.g.rotateZ(d.bank);
+  d.ph += dt * (d.vel.y > 3 ? 17 : 13) * TAU; // a fast, whirring beat as it climbs out
+  beat(d, 0.25, 0.95, 0.55);
+}
+function woodcockStep(d, dt, voice) {
+  const p = d.g.position, v = d.vel, t = (d.clock += dt), W = WOODCOCK;
+  if (d.hidden) {
+    if (t < d.hold && !d.scare) return;
+    d.hidden = false; d.g.visible = true; d.flushT = t; d.base = p.y;
+    v.set(Math.sin(d.head), 0, Math.cos(d.head)).multiplyScalar(1.5).setY(W.climb);
+    voice?.flush(p); return;
+  }
+  const k = t - d.flushT, towering = p.y < d.base + d.tower && k < 1.4;
+  let h = d.head; for (const z of d.zigs) if (k >= z.t) h += z.yaw; // each zig swings it the other way
+  const hs = towering ? 1.5 : d.spd, e = Math.min(1, dt * (towering ? 4 : 6));
+  const turn = wrap(h - Math.atan2(v.x, v.z));
+  v.x += (Math.sin(h) * hs - v.x) * e; v.z += (Math.cos(h) * hs - v.z) * e;
+  v.y += ((towering ? W.climb : clamp((d.base + d.alt - p.y) * 1.5, -3, 3)) - v.y) * Math.min(1, dt * 6);
+  d.bank += (clamp(-turn * 1.4, -1, 1) - d.bank) * Math.min(1, dt * 10);
+  p.addScaledVector(v, dt);
+  d.gone = Math.hypot(p.x - d.hunter, p.z) > W.away;
+}
+
 /* ---------- Shot birds ----------
    How a bird comes down depends on where the pattern took it (bird space: +z toward the head, ±x out along the wings):
    fold  — the core of the pattern on the body: killed in the air. Limp, it carries on along its line, knocked on by
@@ -129,9 +164,9 @@ function doveStep(d, dt, voice) {
            the top and falls.
    glide — struck lightly by the fringe of a long-range pattern: it sets its wings and sails down at a shallow angle,
            to come down well beyond where it was hit (or die on the way). */
-const VT = { finch: 9, thrush: 12, dove: 13, duck: 22 };        // terminal speed of a limp bird, m/s
-const KNOCK = { finch: 2.2, thrush: 1.6, dove: 1.4, duck: 0.5 }; // m/s a close, full pattern adds along the line of the shot
-const SPIN = { finch: 1.4, thrush: 1, dove: 1, duck: 0.5 };    // light birds are set spinning harder
+const VT = { finch: 9, thrush: 12, dove: 13, woodcock: 12, duck: 22 };        // terminal speed of a limp bird, m/s
+const KNOCK = { finch: 2.2, thrush: 1.6, dove: 1.4, woodcock: 1.4, duck: 0.5 }; // m/s a close, full pattern adds along the line of the shot
+const SPIN = { finch: 1.4, thrush: 1, dove: 1, woodcock: 1, duck: 0.5 };    // light birds are set spinning harder
 const Z = new THREE.Vector3(0, 0, 1), loc = new THREE.Vector3(), axis = new THREE.Vector3(), fwd = new THREE.Vector3();
 const tq = new THREE.Quaternion(), rq = new THREE.Quaternion(), m4 = new THREE.Matrix4();
 const randomAxis = v => v.set(rnd(-1, 1), rnd(-1, 1), rnd(-1, 1)).normalize();

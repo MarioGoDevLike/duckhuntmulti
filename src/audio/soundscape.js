@@ -210,6 +210,18 @@ export function createAudio(volume = 1) {
       const n = ac.currentTime, b = bus({ at, send: 0.12, gain: vol * 0.9 }), f = rnd(1900, 2500), beat = rnd(0.11, 0.14);
       for (let i = 0; i < 7; i++) noise(b, n + i * beat, 0.6 * (1 - i / 8), 'bandpass', f * 1.12, f * 0.95, beat * 0.8, 9, 0.02);
     },
+    // The pointer's bell as it quarters the cover: a small brass bell, two strikes of the clapper.
+    bell(at) {
+      if (ac.state !== 'running') return;
+      const n = ac.currentTime, b = bus({ at, send: 0.25, gain: 0.35 }), f = rnd(2450, 2650);
+      for (const t of [0, rnd(0.07, 0.11)]) { tone(b, n + t, 0.5, f, f * 0.995, 0.22); tone(b, n + t, 0.22, f * 2.76, f * 2.75, 0.12); tone(b, n + t, 0.12, f * 5.4, f * 5.4, 0.06); }
+    },
+    // A woodcock bursting out of cover: a loud whirr of rounded wings, the beats quickening as it climbs, fading away.
+    flush(at) {
+      if (ac.state !== 'running') return;
+      const n = ac.currentTime, b = bus({ at, send: 0.15, gain: 1.1 });
+      for (let i = 0, t = 0; i < 14; i++, t += 0.075 - i * 0.002) noise(b, n + t, 0.9 * (1 - i / 15), 'bandpass', rnd(650, 900), 500, 0.06, 3, 0.004);
+    },
     /* ---------- the night hunt ---------- */
     // A thrush's thin "tsip" in the dark as it comes in: always the synthesised call, as the recording is song.
     alarm(at, vol = 1) {

@@ -35,7 +35,7 @@ export function createEnvironment(scene, renderer) {
   const col = new THREE.Color(), m = new THREE.Object3D();
 
   const uTime = { value: 0 };
-  let applyMow, grassMat; // applyMow([x0, x1, z0, z1]) cuts the grass short inside the rectangle; applyMow(null) lets it all grow back
+  let applyMow, grassMat, grassMesh; // applyMow([x0, x1, z0, z1]) cuts the grass short inside the rectangle; applyMow(null) lets it all grow back
   { // wind-blown grass around the hunter
     const geo = new THREE.PlaneGeometry(0.1, 1, 1, 4).translate(0, 0.5, 0), p = geo.attributes.position;
     const c = new Float32Array(p.count * 3);
@@ -58,7 +58,7 @@ export function createEnvironment(scene, renderer) {
       gd.set([m.position.x, m.position.z, m.rotation.x, m.rotation.y, m.rotation.z, m.scale.x, m.scale.y], i * 7);
       grass.setColorAt(i, col.setHSL(rnd(0.12, 0.24), rnd(0.3, 0.55), rnd(0.3, 0.5)));
     }
-    scene.add(grass);
+    scene.add(grass); grassMesh = grass;
     applyMow = rect => {
       for (let i = 0; i < N; i++) {
         const o = i * 7, x = gd[o], z = gd[o + 1], h = floorH(x, z), cut = rect && x > rect[0] && x < rect[1] && z > rect[2] && z < rect[3];
@@ -106,6 +106,7 @@ export function createEnvironment(scene, renderer) {
     mow(rect) { mowRect = rect; applyMow(rect); mown = true; },
     growBack() { if (mown) { mowRect = null; applyMow(null); mown = false; } },
     setMap,
+    grassDensity(k) { grassMesh.count = Math.round(grassMesh.instanceMatrix.count * k); }, // blades are scattered at random, so drawing the first k of them thins evenly
     dawn: k => light(Math.min(1, Math.max(0, k))), // night maps: how far toward first light
     get map() { return map; },
     reachable: p => map.reachable(p), // a bird down here can be fetched (not lost in the trees or the valley)
