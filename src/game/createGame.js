@@ -47,7 +47,7 @@ export function createGame(canvas, cb) {
   let W = WEAPONS.semi, chokes = chokesFor('semi'), Q = QUARRY.duck, map = MENU_MAP, mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, poseT = 0;
   // Night: role 'lamp' | 'gun' | 'both' (a solo test night) · lampState: our lamp, if we hold it · peers: the others' poses.
   let role = 'gun', lampSlot = -1, peers = [], kills = 0;
-  const lampState = { on: false, spot: false, red: false, bat: 1 };
+  const lampState = { on: false, spot: false, red: false, laser: false, bat: 1 };
   const holdsLamp = () => Q.night && role !== 'gun', holdsGun = () => !Q.night || role !== 'lamp';
   let RT = roundTime('duck'), timeLeft = RT, score = 0, bagged = 0, shots = 0, shells = W.mag, reloading = false, reloadT = 0, nextShot = 0, lastKill = -9, lastSec = 0;
   const killLog = new Map(); // bird id → 'me' or the id of the hunter who bagged it
@@ -144,12 +144,13 @@ export function createGame(canvas, cb) {
     if (!Q.night || state !== 'play') return;
     if (/^Digit[1-4]$/.test(code)) cb.onCall?.(+code.slice(5));
     else if (code === 'KeyF') lampMode('red');
-    else if (code === 'KeyQ' && role === 'both') lampMode('spot');
+    else if (code === 'KeyQ') lampMode('spot');
+    else if (code === 'KeyK' && role === 'both') lampMode('laser');
     else if (code === 'KeyL' && role === 'both') toggleLamp();
   }
   const wantReload = () => { if (shells < W.mag && !reloading) { reloading = true; if (!W.single) audio?.open(); hud(); } };
   const setAim = v => {
-    if (!holdsGun()) { if (v) lampMode('spot'); return; } // the lamper's right button narrows the beam to a spot, or widens it
+    if (!holdsGun()) { if (v) lampMode('laser'); return; } // the lamper's right button: the laser on, and off again
     if (aim !== v) { aim = v; hud(); }
   };
   const toggleHold = () => { if (inspector.canGrab) aim = false; inspector.toggle(); }; // picking a bird up lowers the gun
@@ -328,7 +329,7 @@ export function createGame(canvas, cb) {
       mp = room || null; R = mp ? mulberry(mp.seed) : Math.random;
       elapsed = mp ? (Date.now() - mp.startAt) / 1000 : 0; nextSpawn = 1.5; timeLeft = RT - elapsed; lastSec = 0;
       role = Q.night ? (room?.role || 'both') : 'gun'; lampSlot = room?.lampSlot ?? -1; kills = 0;
-      Object.assign(lampState, { on: false, spot: false, red: false, bat: 1 });
+      Object.assign(lampState, { on: false, spot: false, red: false, laser: false, bat: 1 });
       hunters.setGap(Q.night ? NIGHT.gap : 5); lamp.hide(); lamp.setMine(holdsLamp()); audio.night(!!Q.night);
       camera.position.set(mp ? slotX(mp.slot, mp.count, Q.night ? NIGHT.gap : 5) : 0, EYE, 0);
       retriever.reset(); retriever.show(true);
@@ -371,7 +372,7 @@ export function createGame(canvas, cb) {
     // Our claim lost the race: take the points back.
     revokeKill(pts) { if (Q.night) { kills = Math.max(0, kills - 1); hud(); return; } score = Math.max(0, score - pts); bagged = Math.max(0, bagged - 1); hud(); },
     // list: [{ id, name, slot, yaw, pitch, shots }] for the other hunters in the round.
-    setPeers(list) { if (mp) { peers = list; hunters.sync(list, mp.count, at => audio?.distantShot(at)); } },
+    setPeers(list) { if (mp) { peers = list; hunters.sync(list.map(p => ({ ...p, holdsLamp: Q.night && p.slot === lampSlot })), mp.count, at => audio?.distantShot(at)); } },
     // Night: an event from the lamper's screen (see game/night.js).
     nightEvent(ev) { if (state === 'play' && Q.night) night.apply(ev); },
     // Night: the touch buttons.

@@ -13,7 +13,7 @@ function NightPanel({ n }) {
       {lamper && (
         <div className={L.on ? 'lamp on' : 'lamp'}>
           <b>{L.on ? 'LAMP ON' : 'LAMP OFF'}</b>
-          <span>{L.spot ? 'Spot' : 'Flood'}{L.red ? ' · Red filter' : ''}</span>
+          <span>{L.spot ? 'Spot' : 'Flood'}{L.red ? ' · Red filter' : ''}{L.laser ? ' · LASER' : ''}</span>
           <i className="bat"><i style={{ width: `${Math.round(L.bat * 100)}%` }} className={L.bat < 0.15 ? 'low' : ''} /></i>
         </div>
       )}
@@ -23,8 +23,8 @@ function NightPanel({ n }) {
       </div>
       {!TOUCH && (
         <div className="keys">
-          {lamper ? <>Click lamp · Right-click spot/flood · F red · watch the projector beams for a bird, then hold it in your light</> : <>Birds show in the projector beams and the lamp · every shot sends them higher</>}
-          {n.role === 'both' && <> · L lamp · Q spot · click shoots</>}
+          {lamper ? <>Click lamp on/off · Right-click laser on/off · Q spot · F red · catch a bird in the beams with the lamp, then lead it with the laser</> : <>Birds show in the projector beams and the lamp · every shot sends them higher</>}
+          {n.role === 'both' && <> · L lamp · K laser · click shoots</>}
           <br />Callouts: {[1, 2, 3, 4].map(k => <span key={k}><kbd>{k}</kbd> {callText(n.role, k)} </span>)}
         </div>
       )}
@@ -67,7 +67,7 @@ export default function Hud({ hud, Q, best, msg, standings, me, game }) {
             <button className="fire" onPointerDown={() => game.fire()}>FIRE</button>
           </> : <>
             <button className="reload" onPointerDown={() => game.lampMode('red')}>RED</button>
-            <button className={n.lamp.spot ? 'aim active' : 'aim'} onPointerDown={() => game.lampMode('spot')}>SPOT</button>
+            <button className={n.lamp.laser ? 'aim active' : 'aim'} onPointerDown={() => game.lampMode('laser')}>LASER</button>
             <button className="fire" onPointerDown={() => game.lamp()}>LAMP</button>
           </>}
           {n && <div className="calls">

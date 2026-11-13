@@ -22,10 +22,27 @@ const modelReady = loadModel(hunterUrl, 'Hunter').then(gl => {
 });
 
 function figure(name, flashMat) {
-  const g = model.clone(), arms = g.getObjectByName('Arms');
-  const fl = new THREE.Sprite(flashMat); fl.scale.setScalar(0.9); fl.visible = false; g.getObjectByName('Muzzle').add(fl);
+  const g = model.clone(), arms = g.getObjectByName('Arms'), muzzle = g.getObjectByName('Muzzle'), gun = g.getObjectByName('OverUnderShotgun');
+  const fl = new THREE.Sprite(flashMat); fl.scale.setScalar(0.9); fl.visible = false; muzzle.add(fl);
   const tag = labelSprite([name]); tag.position.y = 2.05; g.add(tag);
-  return { g, arms, fl };
+  // The lamp, for a hunter who carries it instead of the gun: held where the hands are, along the line the gun would point.
+  const along = muzzle.position.clone().sub(gun.position).normalize();
+  const lampProp = new THREE.Group(), black = new THREE.MeshStandardMaterial({ color: 0x18191b, roughness: 0.5, metalness: 0.3 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.065, 0.24, 16), black);
+  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.068, 16), new THREE.MeshBasicMaterial({ color: 0xfff4dc }));
+  lens.position.y = 0.121; lens.rotation.x = -Math.PI / 2;
+  const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.05, 0.13), black); grip.position.set(0, -0.02, -0.09);
+  lampProp.add(body, lens, grip);
+  lampProp.position.copy(gun.position).addScaledVector(along, 0.42); lampProp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), along);
+  lampProp.visible = false; arms.add(lampProp);
+  return { g, arms, fl, gun, lampProp };
+}
+// Show the hunter with the lamp, or with the gun.
+function carry(h, lamp) {
+  if (h.carriesLamp === lamp) return;
+  h.carriesLamp = lamp;
+  if (h.gun) h.gun.visible = !lamp;
+  if (h.lampProp) h.lampProp.visible = lamp;
 }
 
 function standIn(name, flashMat) {
@@ -76,6 +93,7 @@ export function createHunters(scene, flashMat) {
         seen.add(p.id);
         let h = peers.get(p.id);
         if (!h) { h = makeHunter(p.name, flashMat); h.shots = p.shots || 0; h.g.position.set(slotX(p.slot, count, gap), 0, 0); line.add(h.g); peers.set(p.id, h); }
+        carry(h, !!p.holdsLamp);
         h.g.position.x = slotX(p.slot, count, gap);
         h.yaw = p.yaw || 0; h.pitch = clamp(p.pitch || 0, PITCH_MIN, PITCH_MAX);
         if ((p.shots || 0) > h.shots) { h.flT = 0.06; flashLight.position.set(h.g.position.x, EYE, h.g.position.z - 0.8); onShot(line.localToWorld(at.copy(h.g.position).setY(EYE))); }

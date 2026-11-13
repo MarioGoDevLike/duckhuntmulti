@@ -133,7 +133,7 @@ export default function App() {
       // times at night (the guns aim by the lamper's beam). Without that channel it falls back to Firestore, twice a second.
       onPose: ({ yaw, pitch, shots, lamp }) => {
         const n = net.current, l = n.pose; if (!n.playing) return;
-        const lampKey = lamp ? `${+lamp.on}${+lamp.spot}${+lamp.red}${lamp.bat}` : '';
+        const lampKey = lamp ? `${+lamp.on}${+lamp.spot}${+lamp.red}${+lamp.laser}${lamp.bat}` : '';
         const still = n.night && n.live ? 0.004 : 0.03;
         if (l && l.shots === shots && l.lampKey === lampKey && Math.abs(l.yaw - yaw) < still && Math.abs(l.pitch - pitch) < still) return;
         n.pose = { yaw, pitch, shots, lampKey };

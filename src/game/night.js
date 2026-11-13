@@ -12,7 +12,7 @@ import { NIGHT } from '../config/gameplay.js';
 import { TAU } from '../core/math.js';
 import { makeBird } from '../entities/birds/bird.js';
 
-const C = NIGHT.circle;
+const C = NIGHT.circle, L = NIGHT.laser;
 const v = new THREE.Vector3(), ahead = new THREE.Vector3();
 
 // hooks: { flock, lamp, audio() (the soundscape, or null), onEvent(ev) (to the room), onFound(bird) }.
@@ -24,7 +24,8 @@ export function createNight(hooks) {
   /* ---------- a bird's path ---------- */
   // Pass: a straight run across the field, through one of the projectors' beams, and away — unless the lamp catches
   // it. Circle: once held in the lamp, round and round the tree, the radius breathing in and out, at a height that
-  // rises with every fright. Out: away and up, gone.
+  // rises with every fright. Follow: while the laser is on, a held bird flies where it points (at about the distance it
+  // already is from the lamp); when the laser goes off it circles the tree again from where it is. Out: away, gone.
   function place(d, dt) {
     const n = d.n, t = d.life, p = d.g.position;
     n.alt += (C.alt[0] + n.alt0 + n.level * C.climb - n.alt) * Math.min(1, dt * 0.7);
@@ -42,6 +43,14 @@ export function createNight(hooks) {
         d.vel.normalize().multiplyScalar(NIGHT.outSpeed).addScaledVector(v.set(p.x - centre.x, 0, p.z - centre.z).normalize(), 6);
         d.vel.y = NIGHT.outSpeed * 0.5;
       }
+    } else if (n.phase === 'follow') {
+      const reach = Math.min(L.reach[1], Math.max(L.reach[0], p.distanceTo(lamp.origin)));
+      v.copy(lamp.origin).addScaledVector(lamp.dir, reach); v.y = Math.max(v.y, L.floor) + n.level * C.climb; // every fright puts it higher
+      const to = v.sub(p), dist = to.length();
+      ahead.copy(to).multiplyScalar(Math.min(L.speed, dist * 1.5) / Math.max(dist, 0.01));
+      ahead.x += Math.sin(t * 2.3 + n.ph) * 1.5; ahead.y += Math.sin(t * 1.7 + n.ph) * 0.8; // never quite a straight line
+      d.vel.lerp(ahead, Math.min(1, dt * L.turn)); p.addScaledVector(d.vel, dt); n.alt = p.y;
+      if (n.level >= C.leaveAfter) { n.phase = 'out'; n.tOut = t; d.vel.y = NIGHT.outSpeed * 0.5; d.vel.setLength(NIGHT.outSpeed); }
     } else p.addScaledVector(d.vel, dt);
     return n.phase === 'out' && t - n.tOut > 9;
   }
@@ -66,7 +75,7 @@ export function createNight(hooks) {
   function apply(ev) {
     if (ev.t === 'spook') { for (const d of flock.birds) if (d.n && d.alive) d.n.level++; return; }
     const d = flock.birds.find(b => b.id === ev.id && b.n); if (!d) return;
-    if (ev.t === 'hold' && d.alive && d.n.phase === 'in') { // caught in the lamp: it turns and starts circling the tree
+    if (ev.t === 'hold' && d.alive && d.n.phase !== 'out' && d.n.phase !== 'dead') { // caught in the lamp (or let off the laser): it circles the tree from here
       const n = d.n, p = d.g.position.fromArray(ev.at);
       n.phase = 'circle'; n.tIn = d.life; n.th0 = Math.atan2(p.z - centre.z, p.x - centre.x);
       n.r = Math.min(C.r[1] + 4, Math.max(C.r[0], Math.hypot(p.x - centre.x, p.z - centre.z)));
@@ -105,6 +114,14 @@ export function createNight(hooks) {
     killed(d) { if (d.n) d.n.phase = 'dead'; },
     update(dt, elapsed) {
       while (next < arrivals.length && elapsed >= arrivals[next].at) { const a = arrivals[next++]; spawn(a, elapsed - a.at); }
+      for (const d of flock.birds) { // the laser: every held bird follows it while it is on (each screen steers by the lamper's pose)
+        const n = d.n; if (!n || !d.alive) continue;
+        if (n.phase === 'circle' && lamp.laser) n.phase = 'follow';
+        else if (n.phase === 'follow' && !lamp.laser) {
+          apply({ t: 'hold', id: d.id, at: d.g.position.toArray() });
+          if (authority) hooks.onEvent?.({ t: 'hold', id: d.id, at: d.g.position.toArray().map(x => +x.toFixed(2)) }); // everyone circles from the same place
+        }
+      }
       if (!authority) return;
       for (const d of flock.birds) { // the lamper's screen decides when the lamp has caught a passing bird
         const n = d.n; if (!n || !d.alive || n.phase !== 'in') continue;

@@ -41,18 +41,22 @@ export function createLamp(scene, camera) {
   light.shadow.bias = -0.0004; light.shadow.normalBias = 0.02; light.shadow.camera.near = 0.4;
   scene.add(light, light.target);
   const beam = makeBeam(0xffffff, 0); scene.add(beam);
+  // The laser: a thin, bright green line out of the lamp's head, seen by everyone in the field.
+  const laser = makeBeam(0x39ff5a, 5); laser.visible = false; scene.add(laser);
+  let laserOn = false;
   const glare = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTexture(), color: 0xfff4e0, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
   glare.scale.setScalar(0.5); scene.add(glare); // the lens seen from in front, on the others' screens
   const hand = handLamp(); hand.g.position.set(0.2, -0.19, -0.42); hand.g.visible = false; camera.add(hand.g);
 
   const origin = new THREE.Vector3(), dir = new THREE.Vector3(0, 0, -1), to = new THREE.Vector3();
   let cur = beamOf(null), flick = 1, mine = false;
-  const hide = () => { light.visible = beam.visible = glare.visible = false; light.intensity = 0; cur = beamOf(null); };
+  const hide = () => { light.visible = beam.visible = glare.visible = laser.visible = false; laserOn = false; light.intensity = 0; cur = beamOf(null); };
   hide();
 
   return {
     origin, dir,
     get beam() { return cur; },
+    get laser() { return laserOn; },
     // In my hand (the lamper's screen) or someone else's.
     shadowSize(n) { if (light.shadow.mapSize.x !== n) { light.shadow.mapSize.set(n, n); light.shadow.map?.dispose(); light.shadow.map = null; } },
     setMine(v) { mine = hand.g.visible = !!v; }, // !!: three hides only on visible === false, and a day hunt passes null
@@ -69,6 +73,8 @@ export function createLamp(scene, camera) {
       beam.material.uniforms.uColor.value.copy(cur.color); beam.material.uniforms.uOpacity.value = (state?.red ? 0.3 : 0.22) * flick;
       glare.visible = !mine && cur.cd > 0; glare.position.copy(origin).addScaledVector(dir, 0.15); glare.material.color.copy(cur.color);
       hand.lens.color.copy(cur.cd > 0 ? cur.color : DARK_LENS);
+      laserOn = !!state?.laser && state.bat > 0; laser.visible = laserOn;
+      if (laserOn) aimBeam(laser, origin, dir, 160, 0.0028);
     },
     // How hard the beam presses on a point: 0 outside it … about 1 in the middle of a flood at 15 m (more for the spot,
     // and close in). The light falls off across the penumbra and toward the end of its reach.
