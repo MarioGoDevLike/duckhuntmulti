@@ -68,7 +68,7 @@ export function createGame(canvas, cb) {
   });
   const inspector = createInspector(camera, scene, flock, () => hud());
   const lamp = createLamp(scene, camera);
-  const shotcam = createShotcam(renderer, scene, camera, view.rig); // films only while the player has it on in Settings
+  const shotcam = createShotcam(renderer, scene, view.rig); // films only while the player has it on in Settings
   const night = createNight({
     flock, lamp, audio: () => (state === 'play' ? audio : null),
     onEvent: ev => cb.onNightEvent?.(ev),
@@ -282,8 +282,9 @@ export function createGame(canvas, cb) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (!paused || mp) step(dt); // a room's hunt keeps running while one player sits in the pause menu
     audio?.listen(camera);
-    // With the shotcam on, the frame is drawn in two passes (world, then the gun) and the shotcam films the world pass.
-    if (settings.shotcam) shotcam.render(dt, state === 'play'); else renderer.render(scene, camera);
+    // The shotcam, when on, renders its own view first; the game's render then paints over it.
+    if (settings.shotcam) shotcam.capture(dt, camera, state === 'play');
+    renderer.render(scene, camera);
   }
 
   /* ---------- input ---------- */
@@ -367,11 +368,10 @@ export function createGame(canvas, cb) {
       return out;
     },
     // s: { volume 0–1, sensitivity (×), fov (degrees), graphics 'high' | 'low', shotcam (on/off), shotcamKey (a KeyboardEvent
-    // code) }, any subset. Turning the shotcam off drops what it has filmed, lets go of
-    // its video encoder and takes the camera off the guns.
+    // code) }, any subset. Turning the shotcam off drops what it has filmed and takes the camera off the guns.
     setSettings(s) {
       Object.assign(settings, s); audio?.setVolume(settings.volume); applyGraphics();
-      shotcam.setEnabled(!!settings.shotcam);
+      if (!settings.shotcam) shotcam.clear();
       setShotkamsVisible(!!settings.shotcam);
     }, // call from a click so a room's start has sound
     // Another hunter (by) claimed this bird first: it falls here too and goes in their bag.
