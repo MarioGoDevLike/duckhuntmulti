@@ -24,8 +24,8 @@ import { createBag } from './bag.js';
 import { createInspector } from './inspector.js';
 import { createInput } from './input.js';
 import { createNight } from './night.js';
-// SHOTCAM OFF (for now, while we check it is not what slows the game): 
-// import { createShotcam } from './shotcam.js';
+import { createShotcam } from './shotcam.js';
+import { setShotkamsVisible } from '../entities/weapons/shotkam.js';
 
 const { clamp } = THREE.MathUtils;
 
@@ -41,7 +41,7 @@ export function createGame(canvas, cb) {
   /* ---------- state ---------- */
   let audio = null, raf = 0, last = performance.now(), T = 0, state = 'menu', paused = false;
   // View and gun handling. ads: 0 hip … 1 shouldered · brk: 0 … 1 over-under broken open.
-  const settings = { volume: 1, sensitivity: 1, fov: 55, graphics: 'high' }; // see App's Settings tab
+  const settings = { volume: 1, sensitivity: 1, fov: 55, graphics: 'high', shotcam: false, shotcamKey: 'KeyS' }; // see App's Settings tab
   let yaw = 0, pitch = 0.16, kick = 0, aim = false, ads = 0, brk = 0, menuSpawnT = 1;
   // The round. mp: { seed, startAt (local ms), slot, count } while hunting in a room; R drives the flights, seeded in a room.
   let W = WEAPONS.semi, chokes = chokesFor('semi'), Q = QUARRY.duck, map = MENU_MAP, mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, poseT = 0;
@@ -68,7 +68,7 @@ export function createGame(canvas, cb) {
   });
   const inspector = createInspector(camera, scene, flock, () => hud());
   const lamp = createLamp(scene, camera);
-  // const shotcam = createShotcam(renderer, scene, view.rig); // SHOTCAM OFF
+  const shotcam = createShotcam(renderer, scene, view.rig); // films only while the player has it on in Settings
   const night = createNight({
     flock, lamp, audio: () => (state === 'play' ? audio : null),
     onEvent: ev => cb.onNightEvent?.(ev),
@@ -106,13 +106,13 @@ export function createGame(canvas, cb) {
   const HOW = { fold: 'clean', wing: 'wing hit', tower: 'towered', glide: 'hit light' };
   function kill(d, range, hit) {
     if (Q.night) { // at night a bird only counts once it has been found on the ground with the lamp
-      kills++; drop(d, hit); killLog.set(d.id, 'me'); lastKill = T; /* shotcam.kill(); SHOTCAM OFF */
+      kills++; drop(d, hit); killLog.set(d.id, 'me'); lastKill = T; if (settings.shotcam) shotcam.kill();
       cb.onMsg('Down · ' + (range | 0) + ' m — the dog is on it'); hud();
       cb.onKill?.(d.id, 0);
       return;
     }
     const speed = d.vel.length(), dbl = T - lastKill < 1.5; lastKill = T;
-    const pts = Math.round((40 + range * 2 + speed * 3) * Q.pts * (dbl ? 2 : 1)); score += pts; bagged++; /* shotcam.kill(); SHOTCAM OFF */
+    const pts = Math.round((40 + range * 2 + speed * 3) * Q.pts * (dbl ? 2 : 1)); score += pts; bagged++; if (settings.shotcam) shotcam.kill();
     const limit = Q.limit && bagged === Q.limit ? `  ·  limit filled: ${Q.limit} ${Q.many}` : '';
     const how = drop(d, hit); cb.onMsg(`${dbl ? 'DOUBLE!  ' : ''}+${pts}  ·  ${range | 0} m  ·  ${HOW[how]}${limit}`); hud();
     killLog.set(d.id, 'me');
@@ -126,7 +126,7 @@ export function createGame(canvas, cb) {
     if (shells <= 0) { audio.empty(); wantReload(); return; }
     const choke = CHOKES[chokes[barrel()]];
     reloading = false; reloadT = 0; shells--; shots++; nextShot = T + W.interval; kick = 1;
-    view.fire(W, shells); audio.shot(W.single); /* shotcam.shot(); SHOTCAM OFF */
+    view.fire(W, shells); audio.shot(W.single); if (settings.shotcam) shotcam.shot();
     shotColumn.fire(camera.position.clone(), camera.getWorldDirection(new THREE.Vector3()), choke);
     // Birds flare at the shot. Solo only: in a room every screen must fly identical birds, and a random
     // flare from one hunter's gun would send their copies somewhere else on everyone else's screen. (In a room
@@ -140,7 +140,8 @@ export function createGame(canvas, cb) {
   function toggleLamp() { if (!holdsLamp() || elapsed < 0) return; lampState.on = !lampState.on && lampState.bat > 0; audio?.click(); hud(); if (mp) pose(); }
   function lampMode(k) { if (!holdsLamp()) return; lampState[k] = !lampState[k]; audio?.click(); hud(); if (mp) pose(); }
   function onKey(code) {
-    // SHOTCAM OFF: if (code === 'KeyS' && state === 'play') { cb.onMsg('Saving shotcam…'); shotcam.save().then(m => cb.onMsg(m), e => cb.onMsg('Shotcam failed: ' + e.message)); return; }
+    // The player's Save clip key (Settings), while the shotcam is on.
+    if (settings.shotcam && code === settings.shotcamKey && state === 'play') { cb.onMsg('Saving shotcam…'); shotcam.save().then(m => cb.onMsg(m), e => cb.onMsg('Shotcam failed: ' + e.message)); return; }
     if (!Q.night || state !== 'play') return;
     if (/^Digit[1-4]$/.test(code)) cb.onCall?.(+code.slice(5));
     else if (code === 'KeyF') lampMode('red');
@@ -281,7 +282,8 @@ export function createGame(canvas, cb) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (!paused || mp) step(dt); // a room's hunt keeps running while one player sits in the pause menu
     audio?.listen(camera);
-    // SHOTCAM OFF: shotcam.capture(dt, camera, state === 'play'); // renders its own view first; the game's render paints over it
+    // The shotcam, when on, renders its own view first; the game's render then paints over it.
+    if (settings.shotcam) shotcam.capture(dt, camera, state === 'play');
     renderer.render(scene, camera);
   }
 
@@ -312,7 +314,7 @@ export function createGame(canvas, cb) {
   };
   onResize(); raf = requestAnimationFrame(frame);
   // Development builds only: a handle for tuning from the console (look somewhere, inspect the birds and the night).
-  if (import.meta.env.DEV) window.__hunt = { flock, night, lamp, /* shotcam, SHOTCAM OFF */ camera, renderer, scene, look(y, p) { yaw = y; pitch = p; }, step, fire, get hud() { return { score, bagged, kills, shells }; } };
+  if (import.meta.env.DEV) window.__hunt = { flock, night, lamp, shotcam, camera, renderer, scene, look(y, p) { yaw = y; pitch = p; }, step, fire, get hud() { return { score, bagged, kills, shells }; } };
 
   /* ---------- public API ---------- */
   return {
@@ -325,7 +327,7 @@ export function createGame(canvas, cb) {
       map = mapOf(room ? room.map : mapId, Q.kind); world.setMap(map);
       audio ||= createAudio(settings.volume); audio.resume();
       W = WEAPONS[weapon] || WEAPONS.semi; chokes = chokesFor(WEAPONS[weapon] ? weapon : 'semi', choke); view.equip(W); brk = 0;
-      flock.reset(); shotColumn.clear(); /* shotcam.clear(); SHOTCAM OFF */ hunters.clear(); bag.clear(); killLog.clear(); peers = [];
+      flock.reset(); shotColumn.clear(); shotcam.clear(); hunters.clear(); bag.clear(); killLog.clear(); peers = [];
       mp = room || null; R = mp ? mulberry(mp.seed) : Math.random;
       elapsed = mp ? (Date.now() - mp.startAt) / 1000 : 0; nextSpawn = 1.5; timeLeft = RT - elapsed; lastSec = 0;
       role = Q.night ? (room?.role || 'both') : 'gun'; lampSlot = room?.lampSlot ?? -1; kills = 0;
@@ -365,8 +367,13 @@ export function createGame(canvas, cb) {
       world.setMap(map);
       return out;
     },
-    // s: { volume 0–1, sensitivity (×), fov (degrees), graphics 'high' | 'low' }, any subset.
-    setSettings(s) { Object.assign(settings, s); audio?.setVolume(settings.volume); applyGraphics(); }, // call from a click so a room's start has sound
+    // s: { volume 0–1, sensitivity (×), fov (degrees), graphics 'high' | 'low', shotcam (on/off), shotcamKey (a KeyboardEvent
+    // code) }, any subset. Turning the shotcam off drops what it has filmed and takes the camera off the guns.
+    setSettings(s) {
+      Object.assign(settings, s); audio?.setVolume(settings.volume); applyGraphics();
+      if (!settings.shotcam) shotcam.clear();
+      setShotkamsVisible(!!settings.shotcam);
+    }, // call from a click so a room's start has sound
     // Another hunter (by) claimed this bird first: it falls here too and goes in their bag.
     remoteKill(id, by) { killLog.set(id, by); const d = flock.birds.find(x => x.id === id && x.alive); if (d) drop(d); },
     // Our claim lost the race: take the points back.

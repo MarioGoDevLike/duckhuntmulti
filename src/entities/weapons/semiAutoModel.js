@@ -2,7 +2,7 @@
 // Until it loads, or if it fails, the procedural gun (semiAuto.js) stays in the hands.
 import * as THREE from 'three';
 import { loadModel, prepareModel } from '../../core/gltf.js';
-// import { mountShotkam } from './shotkam.js'; // SHOTKAM MODEL OFF
+import { mountShotkam } from './shotkam.js';
 import shotgunUrl from '../../assets/models/low_poly_shotgun.glb?url';
 
 // Model frame as loaded: already the gun frame's orientation (barrel along -z, rib on +y), in large units — muzzle at
@@ -20,7 +20,7 @@ export const semiAutoModelReady = loadModel(shotgunUrl, 'Semi-auto').then(gl => 
   gl.scene.scale.setScalar(SCALE); gl.scene.position.copy(OFFSET);
   const gun = new THREE.Group(); gun.add(gl.scene);
   const muzzle = toGun(0, 0.356, -2.477);
-  // SHOTKAM MODEL OFF (for now): mountShotkam(gun, muzzle); // the barrel camera, near the muzzle
+  mountShotkam(gun, muzzle); // the barrel camera, near the muzzle
   return {
     gun,
     muzzle,

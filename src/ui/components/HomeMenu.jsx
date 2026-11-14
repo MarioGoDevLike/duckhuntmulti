@@ -1,7 +1,7 @@
 // The main menu: a full-height sidebar on the left of the live scene listing Hunt / Multiplayer / Controls / Settings,
 // each opening in the same sidebar, with the leaderboard docked on the right (menu only, never in a hunt).
-import { useState } from 'react';
-import { QUARRY } from '../../config/gameplay.js';
+import { useEffect, useState } from 'react';
+import { QUARRY, HUNT_KEYS } from '../../config/gameplay.js';
 import { TOUCH } from '../../config/platform.js';
 import { enabled, logout, MAX_PLAYERS } from '../../net/firebase.js';
 import { clock } from '../lib/format.js';
@@ -9,6 +9,9 @@ import { clock } from '../lib/format.js';
 const CONTROLS = TOUCH
   ? [['Drag', 'Look around'], ['AIM', 'Look down the rib'], ['FIRE / RELOAD', 'On-screen buttons'], ['PICK UP', 'Hold a retrieved bird']]
   : [['Mouse', 'Look around'], ['Hold right click', 'Aim down the rib'], ['Left click', 'Fire'], ['R', 'Reload'], ['E', 'Pick up a retrieved bird'], ['Esc', 'Pause']];
+
+// A key's name as printed on it, from its KeyboardEvent code: KeyS → S, Digit5 → 5, Numpad5 → Num 5, Space → Space.
+const keyName = code => code.replace(/^Key|^Digit/, '').replace(/^Numpad/, 'Num ').replace(/^Arrow/, '') || code;
 
 const SignInFirst = ({ what }) => <div className="empty">Sign in with Google from the menu to {what}.</div>;
 
@@ -73,7 +76,45 @@ const Credits = () => (
   </div>
 );
 
-// Volume, look sensitivity, field of view and graphics quality. settings: see SETTINGS in config/gameplay.js.
+// The shotcam: off or on, and (while on) the key that saves the last kill's clip. Picking the key waits for the next
+// key press; Esc cancels, and keys the hunt already uses are refused. Keyboard only, so not shown on touch screens.
+function ShotcamSetting({ settings, onSetting }) {
+  const [listening, setListening] = useState(false), [err, setErr] = useState('');
+  useEffect(() => {
+    if (!listening) return;
+    const onKey = e => {
+      e.preventDefault(); e.stopPropagation(); // the press is for this, not for the menu behind it
+      if (e.code === 'Escape') { setListening(false); return; }
+      if (HUNT_KEYS.includes(e.code)) { setErr(`${keyName(e.code)} is already used in the hunt: pick another key`); return; }
+      setErr(''); onSetting('shotcamKey', e.code); setListening(false);
+    };
+    addEventListener('keydown', onKey, true);
+    return () => removeEventListener('keydown', onKey, true);
+  }, [listening, onSetting]);
+  const on = settings.shotcam;
+  return <>
+    <div className="setting">
+      <label id="shotcam"><span>Shotcam</span><b>{on ? 'On' : 'Off'}</b></label>
+      <div className="chokerow" role="radiogroup" aria-labelledby="shotcam">
+        {[[false, 'Off', 'No barrel camera, no recording'], [true, 'On', 'A camera on the barrel films your hunt']].map(([v, name, line]) => (
+          <button key={name} role="radio" aria-checked={on === v} className={on === v ? 'choke on' : 'choke'} onClick={() => onSetting('shotcam', v)} title={line}>{name}</button>
+        ))}
+      </div>
+    </div>
+    {on && <div className="setting">
+      <label id="shotcamKey"><span>Save clip key</span><b>{listening ? 'Press a key…' : keyName(settings.shotcamKey)}</b></label>
+      <div className="chokerow">
+        <button className={listening ? 'choke on' : 'choke'} aria-labelledby="shotcamKey" onClick={() => { setErr(''); setListening(!listening); }}>
+          {listening ? 'Press a key (Esc to cancel)' : 'Change key'}
+        </button>
+      </div>
+      {err && <div className="err">{err}</div>}
+      <p className="hint">After a kill, press <b>{keyName(settings.shotcamKey)}</b> to save the last 5 seconds from the barrel camera as a video. The first time, pick the folder to keep them in (your Videos folder is offered).</p>
+    </div>}
+  </>;
+}
+
+// Volume, look sensitivity, field of view, graphics quality and the shotcam. settings: see SETTINGS in config/gameplay.js.
 function Settings({ settings, onSetting }) {
   const row = (id, label, value, shown, props) => (
     <div className="setting">
@@ -93,6 +134,7 @@ function Settings({ settings, onSetting }) {
         ))}
       </div>
     </div>
+    {!TOUCH && <ShotcamSetting settings={settings} onSetting={onSetting} />}
     <p className="hint">Saved in this browser. Changes apply straight away, even mid-hunt.</p>
   </>;
 }
@@ -173,6 +215,7 @@ export default function HomeMenu({ tab, onTab, account, loadout, rooms, quarryPi
             {tab === 'friends' && <Rooms user={user} weaponName={loadout.weaponName} rooms={rooms} />}
             {tab === 'controls' && <dl className="keys">
               {CONTROLS.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
+              {!TOUCH && settings.shotcam && <div><dt>{keyName(settings.shotcamKey)}</dt><dd>Save the shotcam clip of your last kill</dd></div>}
               <p className="hint">The shot takes time to reach the birds: swing through and fire in front of fast ones. Doubles score ×2.{TOUCH && ' Played in landscape.'}</p>
             </dl>}
             {tab === 'settings' && <Settings settings={settings} onSetting={onSetting} />}

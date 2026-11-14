@@ -102,8 +102,12 @@ export const WOODCOCK = {
   away: 45,           // m from the hunter at which it is lost in the wood
 };
 // Player settings (menu Settings tab) and their defaults: volume 0–1, look sensitivity ×, field of view in degrees,
-// graphics 'high' | 'low' (low: native-or-less resolution, thinner grass, coarser lamp shadow — for slower PCs).
-export const SETTINGS = { volume: 0.8, sensitivity: 1, fov: 55, graphics: 'high' };
+// graphics 'high' | 'low' (low: native-or-less resolution, thinner grass, coarser lamp shadow — for slower PCs),
+// shotcam: film from a camera on the barrel (off by default: it draws the scene a second time), shotcamKey: the key that
+// saves the last kill's clip (a KeyboardEvent code).
+export const SETTINGS = { volume: 0.8, sensitivity: 1, fov: 55, graphics: 'high', shotcam: false, shotcamKey: 'KeyS' };
+// Keys the hunt already uses (game/input.js, and the night hunt's in game/createGame.js): not free for the Save clip key.
+export const HUNT_KEYS = ['KeyR', 'KeyE', 'KeyP', 'Escape', 'KeyF', 'KeyQ', 'KeyK', 'KeyL', 'Digit1', 'Digit2', 'Digit3', 'Digit4'];
 export const quarryOf = kind => QUARRY[kind] || QUARRY.duck;
 
 // Hunter and shot.

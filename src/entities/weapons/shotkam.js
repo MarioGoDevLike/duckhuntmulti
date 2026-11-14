@@ -38,6 +38,11 @@ function makeShotkam() {
   return g;
 }
 
+// Every camera mounted so far, shown only while the player has the shotcam on (Settings; off by default).
+const mounted = new Set();
+let shown = false;
+export function setShotkamsVisible(v) { shown = v; mounted.forEach(k => { k.visible = v; }); }
+
 const ray = new THREE.Raycaster(), from = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
 
 // Hang a camera under the barrel `back` metres behind the muzzle. gun: the gun's group, in gun space and not yet
@@ -49,7 +54,7 @@ export function mountShotkam(gun, muzzle, back = 0.16, parent = null) {
   gun.updateMatrixWorld(true);
   ray.set(from.set(0, muzzle.y - 0.3, z), UP); ray.far = 0.3;
   const hit = ray.intersectObject(gun, true)[0];
-  const kam = makeShotkam();
+  const kam = makeShotkam(); kam.visible = shown; mounted.add(kam);
   kam.position.set(0.002, hit ? hit.point.y : muzzle.y - 0.012, z);
   gun.add(kam);
   if (parent) { kam.updateMatrixWorld(true); parent.attach(kam); }

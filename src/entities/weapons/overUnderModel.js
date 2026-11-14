@@ -3,7 +3,7 @@
 // fails, the procedural over-under (overUnder.js) stays in the hands.
 import * as THREE from 'three';
 import { loadModel, prepareModel } from '../../core/gltf.js';
-// import { mountShotkam } from './shotkam.js'; // SHOTKAM MODEL OFF
+import { mountShotkam } from './shotkam.js';
 import drakeUrl from '../../assets/models/low-poly_cz_drake.glb?url';
 
 // Model frame as loaded: muzzle toward +x (x = 458), up +y, in large units — trigger at (-150, 13.7), bead top y = 68.3,
@@ -36,8 +36,8 @@ export const overUnderModelReady = loadModel(drakeUrl, 'Over-under').then(gl => 
   TO_GUN.decompose(gl.scene.position, gl.scene.quaternion, gl.scene.scale);
   const hingeBone = gl.scene.getObjectByName('barrels_01'), rest = hingeBone.quaternion.clone();
   const gun = new THREE.Group(); gun.add(gl.scene);
-  // SHOTKAM MODEL OFF: const muzzle = toGun(470, 54.7); // level with the top barrel: the camera hangs under whatever is lowest
-  // SHOTKAM MODEL OFF (for now): mountShotkam(gun, muzzle, undefined, hingeBone); // on the barrels, so it tips open with them
+  const muzzle = toGun(470, 54.7); // level with the top barrel: the camera hangs under whatever is lowest
+  mountShotkam(gun, muzzle, undefined, hingeBone); // on the barrels, so it tips open with them
   return {
     gun,
     muzzle: toGun(470, 34.3),
