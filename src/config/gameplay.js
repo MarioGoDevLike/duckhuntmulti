@@ -60,8 +60,8 @@ export const NIGHT = {
   // Circling the tree: r radius (m) · alt height above the field (m) · w angular speed (rad/s) · climb: m higher for
   // every shot that frightens it · leaveAfter: frights before it goes · max: s it circles before going anyway.
   circle: { r: [13, 24], alt: [16, 22], w: [0.35, 0.5], climb: 9, leaveAfter: 3, max: 45 },
-  // A held bird following the laser: reach (m from the lamp it keeps to) · floor (m, lowest it comes) · speed (m/s) · turn (how fast it answers).
-  laser: { reach: [15, 55], floor: 9, speed: 11, turn: 2.2 },
+  // A held bird following the laser: reach (m from the lamp it keeps to) · floor (m, lowest it comes; higher with every fright) · speed (m/s) · turn (how fast it answers).
+  laser: { reach: [15, 55], floor: 9, speed: 22, turn: 6, rise: 3 }, // rise: m/s up or down at most, so it darts along the laser rather than shooting up
   holdT: 0.4,                  // s the lamp must stay on a passing bird before it turns to circle the tree
   dark: 0.6,                   // share of the pattern that goes wide at a bird the lamp isn't on
   inSpeed: 12, outSpeed: 13,   // m/s coming in out of the dark, and going

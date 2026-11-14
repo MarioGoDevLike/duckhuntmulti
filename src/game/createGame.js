@@ -47,7 +47,7 @@ export function createGame(canvas, cb) {
   let W = WEAPONS.semi, chokes = chokesFor('semi'), Q = QUARRY.duck, map = MENU_MAP, mp = null, R = Math.random, elapsed = 0, nextSpawn = 0, poseT = 0;
   // Night: role 'lamp' | 'gun' | 'both' (a solo test night) · lampState: our lamp, if we hold it · peers: the others' poses.
   let role = 'gun', lampSlot = -1, peers = [], kills = 0;
-  const lampState = { on: false, spot: false, red: false, laser: false, bat: 1 };
+  const lampState = { on: false, spot: true, red: false, laser: false, bat: 1 };
   const holdsLamp = () => Q.night && role !== 'gun', holdsGun = () => !Q.night || role !== 'lamp';
   let RT = roundTime('duck'), timeLeft = RT, score = 0, bagged = 0, shots = 0, shells = W.mag, reloading = false, reloadT = 0, nextShot = 0, lastKill = -9, lastSec = 0;
   const killLog = new Map(); // bird id → 'me' or the id of the hunter who bagged it
@@ -68,7 +68,7 @@ export function createGame(canvas, cb) {
   });
   const inspector = createInspector(camera, scene, flock, () => hud());
   const lamp = createLamp(scene, camera);
-  const shotcam = createShotcam(renderer, scene, view.rig); // films only while the player has it on in Settings
+  const shotcam = createShotcam(renderer, scene, camera, view.rig); // films only while the player has it on in Settings
   const night = createNight({
     flock, lamp, audio: () => (state === 'play' ? audio : null),
     onEvent: ev => cb.onNightEvent?.(ev),
@@ -282,9 +282,8 @@ export function createGame(canvas, cb) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (!paused || mp) step(dt); // a room's hunt keeps running while one player sits in the pause menu
     audio?.listen(camera);
-    // The shotcam, when on, renders its own view first; the game's render then paints over it.
-    if (settings.shotcam) shotcam.capture(dt, camera, state === 'play');
-    renderer.render(scene, camera);
+    // With the shotcam on, the frame is drawn in two passes (world, then the gun) and the shotcam films the world pass.
+    if (settings.shotcam) shotcam.render(dt, state === 'play'); else renderer.render(scene, camera);
   }
 
   /* ---------- input ---------- */
@@ -331,7 +330,7 @@ export function createGame(canvas, cb) {
       mp = room || null; R = mp ? mulberry(mp.seed) : Math.random;
       elapsed = mp ? (Date.now() - mp.startAt) / 1000 : 0; nextSpawn = 1.5; timeLeft = RT - elapsed; lastSec = 0;
       role = Q.night ? (room?.role || 'both') : 'gun'; lampSlot = room?.lampSlot ?? -1; kills = 0;
-      Object.assign(lampState, { on: false, spot: false, red: false, laser: false, bat: 1 });
+      Object.assign(lampState, { on: false, spot: true, red: false, laser: false, bat: 1 });
       hunters.setGap(Q.night ? NIGHT.gap : 5); lamp.hide(); lamp.setMine(holdsLamp()); audio.night(!!Q.night);
       camera.position.set(mp ? slotX(mp.slot, mp.count, Q.night ? NIGHT.gap : 5) : 0, EYE, 0);
       retriever.reset(); retriever.show(true);
@@ -368,10 +367,11 @@ export function createGame(canvas, cb) {
       return out;
     },
     // s: { volume 0–1, sensitivity (×), fov (degrees), graphics 'high' | 'low', shotcam (on/off), shotcamKey (a KeyboardEvent
-    // code) }, any subset. Turning the shotcam off drops what it has filmed and takes the camera off the guns.
+    // code) }, any subset. Turning the shotcam off drops what it has filmed, lets go of
+    // its video encoder and takes the camera off the guns.
     setSettings(s) {
       Object.assign(settings, s); audio?.setVolume(settings.volume); applyGraphics();
-      if (!settings.shotcam) shotcam.clear();
+      shotcam.setEnabled(!!settings.shotcam);
       setShotkamsVisible(!!settings.shotcam);
     }, // call from a click so a room's start has sound
     // Another hunter (by) claimed this bird first: it falls here too and goes in their bag.

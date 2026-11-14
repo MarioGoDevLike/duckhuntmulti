@@ -45,10 +45,10 @@ export function createNight(hooks) {
       }
     } else if (n.phase === 'follow') {
       const reach = Math.min(L.reach[1], Math.max(L.reach[0], p.distanceTo(lamp.origin)));
-      v.copy(lamp.origin).addScaledVector(lamp.dir, reach); v.y = Math.max(v.y, L.floor) + n.level * C.climb; // every fright puts it higher
+      v.copy(lamp.origin).addScaledVector(lamp.dir, reach); v.y = Math.max(v.y, L.floor + n.level * C.climb); // every fright keeps it higher
       const to = v.sub(p), dist = to.length();
       ahead.copy(to).multiplyScalar(Math.min(L.speed, dist * 1.5) / Math.max(dist, 0.01));
-      ahead.x += Math.sin(t * 2.3 + n.ph) * 1.5; ahead.y += Math.sin(t * 1.7 + n.ph) * 0.8; // never quite a straight line
+      ahead.x += Math.sin(t * 2.3 + n.ph) * 2; ahead.y = Math.max(-L.rise, Math.min(L.rise, ahead.y + Math.sin(t * 1.7 + n.ph) * 0.8)); // darting, never quite straight, and never straight up
       d.vel.lerp(ahead, Math.min(1, dt * L.turn)); p.addScaledVector(d.vel, dt); n.alt = p.y;
       if (n.level >= C.leaveAfter) { n.phase = 'out'; n.tOut = t; d.vel.y = NIGHT.outSpeed * 0.5; d.vel.setLength(NIGHT.outSpeed); }
     } else p.addScaledVector(d.vel, dt);
