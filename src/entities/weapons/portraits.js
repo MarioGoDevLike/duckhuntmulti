@@ -28,6 +28,7 @@ export function gunPortraits(models = {}, w = 720, h = 200) {
     const key = new THREE.DirectionalLight(0xfff1dc, 2.2); key.position.set(1, 3, 4); scene.add(key);
     const rim = new THREE.DirectionalLight(0xd6e4ff, 1.4); rim.position.set(-2, 1, -3); scene.add(rim);
     const cam = new THREE.PerspectiveCamera(16, w / h, 0.05, 50);
+    cam.layers.enableAll(); // the guns may be on the shotcam's gun layer (game/shotcam.js)
     for (const kind of Object.keys(PROCEDURAL)) {
       const gun = models[kind] ? cloneSkinned(models[kind].gun) : PROCEDURAL[kind]();
       // Gun space has the barrels along -z: turn it so the muzzle points right and its right side faces the camera.
